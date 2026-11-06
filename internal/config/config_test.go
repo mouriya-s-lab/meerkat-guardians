@@ -115,6 +115,16 @@ func TestLoadErrorsNameKeyPath(t *testing.T) {
 			"guardians/bases.yaml: bases[0].branch: missing",
 		},
 		{
+			"missing ready timeout",
+			map[string][2]string{"guardians/runtime.yaml": {"  readyTimeoutSeconds: 120\n", ""}},
+			"guardians/runtime.yaml: omp.readyTimeoutSeconds: missing",
+		},
+		{
+			"zero exit grace",
+			map[string][2]string{"guardians/runtime.yaml": {"exitGraceSeconds: 30", "exitGraceSeconds: 0"}},
+			"guardians/runtime.yaml: omp.exitGraceSeconds: missing",
+		},
+		{
 			"missing shared key",
 			map[string][2]string{"shared/repos.yaml": {"omp: []\n", ""}},
 			"shared/repos.yaml: omp: missing",

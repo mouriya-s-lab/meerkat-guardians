@@ -127,7 +127,7 @@ func (m *Manager) run(b config.Base) error {
 	}
 	rt := m.cfg.Runtime
 	_, err = m.reg.Run(ctx, sessions.Spec{
-		Bin: rt.OMP.Bin, AgentDir: rt.OMP.AgentDir, Extension: rt.OMP.Extension,
+		OMP:   rt.OMP,
 		Model: b.Model, SystemPrompt: g.Prompt, Tools: g.ToolsArg(),
 		SessionDir: m.Dir(b.ID), Cwd: dir,
 		GoalTool: m.cfg.Goals.Base.Tool, Opening: opening, Continue: cont,

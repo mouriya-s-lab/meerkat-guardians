@@ -22,6 +22,9 @@ func TestMain(m *testing.M) {
 	case "rpc":
 		fakeRPC()
 		os.Exit(0)
+	case "session":
+		fakeSession()
+		os.Exit(0)
 	}
 }
 

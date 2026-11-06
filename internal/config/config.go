@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 	"text/template"
+	"time"
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
@@ -44,10 +45,18 @@ type Runtime struct {
 }
 
 type OMP struct {
-	Bin       string `yaml:"bin"`
-	AgentDir  string `yaml:"agentDir"`
-	Extension string `yaml:"extension"`
+	Bin                 string `yaml:"bin"`
+	AgentDir            string `yaml:"agentDir"`
+	Extension           string `yaml:"extension"`
+	ReadyTimeoutSeconds int    `yaml:"readyTimeoutSeconds"`
+	ExitGraceSeconds    int    `yaml:"exitGraceSeconds"`
 }
+
+// ReadyTimeout bounds how long an omp child may take to emit its ready frame.
+func (o OMP) ReadyTimeout() time.Duration { return time.Duration(o.ReadyTimeoutSeconds) * time.Second }
+
+// ExitGrace is how long an omp child may take to exit after its stdin closes before it is killed.
+func (o OMP) ExitGrace() time.Duration { return time.Duration(o.ExitGraceSeconds) * time.Second }
 
 type Guardian struct {
 	ID          string   `yaml:"id"`
@@ -261,6 +270,8 @@ func Load(root string) (*Config, error) {
 		f.str("omp.bin", r.OMP.Bin)
 		f.str("omp.agentDir", r.OMP.AgentDir)
 		f.str("omp.extension", r.OMP.Extension)
+		f.positive("omp.readyTimeoutSeconds", r.OMP.ReadyTimeoutSeconds)
+		f.positive("omp.exitGraceSeconds", r.OMP.ExitGraceSeconds)
 		f.positive("maxContinuePrompts", r.MaxContinuePrompts)
 		f.positive("maxConcurrentWarmups", r.MaxConcurrentWarmups)
 		r.SessionsDir = resolve(r.SessionsDir)

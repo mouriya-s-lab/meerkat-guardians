@@ -99,7 +99,7 @@ func (r *Runner) Read(ctx context.Context, req Request) (Result, error) {
 	}
 	rt := r.cfg.Runtime
 	res, err := r.reg.Run(ctx, sessions.Spec{
-		Bin: rt.OMP.Bin, AgentDir: rt.OMP.AgentDir, Extension: rt.OMP.Extension,
+		OMP:   rt.OMP,
 		Model: base.Model, SystemPrompt: g.Prompt, Tools: g.ToolsArg(),
 		SessionDir: filepath.Join(rt.SessionsDir, "proxy", baseID), Cwd: r.co.Dir(base.Repo),
 		ForkFrom: source,

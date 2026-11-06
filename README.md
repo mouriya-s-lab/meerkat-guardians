@@ -6,7 +6,7 @@ Pepgent PM intent guardians: a Go daemon that keeps pre-warmed headless omp **ba
 - A proxy read forks the newest ready base (`omp --fork`), so it shares the base's system prompt, tools, plugin and model and reuses its prompt cache; it ends by calling `pm_return_facts`, whose `facts` argument is the HTTP response.
 - State lives in the omp session files under `sessionsDir`; the program keeps no database.
 
-`omprpc/` is a public Go package (an omp RPC client: ready frame, id-correlated commands, events) that `oh-my-omp/pm-council` imports.
+`omprpc/` is a public Go package that `oh-my-omp/pm-council` imports: an omp RPC client (ready frame, id-correlated commands, events) and `RunSession`, the shared headless-session loop that holds a session until one of its goal tools succeeds.
 
 ## Run locally
 
@@ -74,6 +74,8 @@ The plugin (`plugin/index.ts`) reads `PM_KIND`, `PM_GOAL_TOOL`, `PM_CONTINUE` an
 | `omp.bin` | omp executable |
 | `omp.agentDir` | `PI_CODING_AGENT_DIR` of every omp child |
 | `omp.extension` | the plugin entry, `plugin/index.ts` |
+| `omp.readyTimeoutSeconds` | seconds an omp child may take to emit its ready frame |
+| `omp.exitGraceSeconds` | seconds an omp child may take to exit after its stdin closes before it is killed |
 | `maxContinuePrompts` | program-side continue prompts per session before it fails |
 | `maxConcurrentWarmups` | warm runs at once |
 

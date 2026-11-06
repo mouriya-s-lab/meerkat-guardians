@@ -1,0 +1,18 @@
+base:
+  tool: pm_base_ready
+  opening: |
+    你现在为仓库 {{.Repo}}（分支 {{.Branch}}）做准备：工作目录就是该仓库的检出。
+    通读仓库：目录结构、入口、主要模块、配置与设计文档，记住各部分所在的文件与行号，以便之后回答问题时直接引用。
+    {{if .Focus}}重点留意：{{.Focus}}
+    {{end}}读完后调用 pm_base_ready，summary 写这个仓库是什么、主要部分在哪些路径。
+  continue: 你还没有调用 pm_base_ready。继续读仓库，读完后调用 pm_base_ready 结束本任务。
+proxy:
+  tool: pm_return_facts
+  opening: |
+    议会席位 {{.Seat}} 在审议议题 {{.Agenda}} 时，请你代读仓库 {{.Repo}}，回答下面的问题：
+
+    {{.Question}}
+
+    只依据仓库里的内容作答。每条事实注明仓库内相对路径与行号，或设计书的章节。
+    答完调用 pm_return_facts，facts 写全部事实（markdown）；这是结束本任务的唯一方式。
+  continue: 你还没有调用 pm_return_facts。把已查到的事实连同路径与行号交给 pm_return_facts 结束本任务。

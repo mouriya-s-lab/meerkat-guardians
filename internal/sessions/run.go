@@ -16,12 +16,12 @@ import (
 type Spec struct {
 	OMP                        config.OMP
 	Model, SystemPrompt, Tools string
-	SessionDir, Cwd          string
-	ForkFrom                 string // base session file for forks; empty for bases
-	GoalTool                 string
-	Opening, Continue        string
-	Meta                     Meta
-	MaxContinuePrompts       int
+	SessionDir, Cwd            string
+	ForkFrom                   string // base session file for forks; empty for bases
+	GoalTool                   string
+	Opening, Continue          string
+	Meta                       Meta
+	MaxContinuePrompts         int
 }
 
 // Result is a session that reached its goal: Args are the goal tool call's arguments.
@@ -128,6 +128,7 @@ type Summary struct {
 	State     string     `json:"state"`
 	Error     *string    `json:"error"`
 	Ref       *string    `json:"ref"`
+	Parent    *string    `json:"parent"`
 }
 
 // List derives session rows from every session file under dir, newest first, at most limit rows.
@@ -146,6 +147,10 @@ func (r *Registry) List(dir string, goalTools map[Kind]string, limit int) ([]Sum
 	out := make([]Summary, 0, len(files))
 	for _, f := range files {
 		s := Summary{ID: f.ID, StartedAt: f.StartedAt}
+		if f.ParentSession != "" {
+			parent := f.ParentSession
+			s.Parent = &parent
+		}
 		var label string
 		if m := f.Meta; m != nil {
 			s.Kind, s.Model = m.Kind, m.Model

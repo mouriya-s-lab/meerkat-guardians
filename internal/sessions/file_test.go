@@ -84,3 +84,25 @@ func TestListDerivesState(t *testing.T) {
 		t.Fatalf("FindFile = %q %v %v", path, ok, err)
 	}
 }
+
+// fixtures/parent holds a real base session file and a proxy read forked from it, unchanged.
+func TestListParent(t *testing.T) {
+	dir, err := filepath.Abs("fixtures/parent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, err := NewRegistry().List(dir, map[Kind]string{KindBase: "pm_base_ready", KindProxy: "pm_return_facts"}, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("list = %+v", list)
+	}
+	fork, base := list[0], list[1] // newest first
+	if base.Kind != KindBase || base.Parent != nil {
+		t.Fatalf("base = %+v", base)
+	}
+	if fork.Kind != KindProxy || fork.Parent == nil || *fork.Parent != base.ID {
+		t.Fatalf("fork = %+v, want parent %q", fork, base.ID)
+	}
+}

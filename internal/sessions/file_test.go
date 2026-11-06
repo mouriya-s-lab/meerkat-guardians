@@ -59,7 +59,7 @@ func TestListDerivesState(t *testing.T) {
 	}
 	reg := NewRegistry()
 	reg.failures["01a1b2c3-ebac-7278-9d2c-cc847f67771e"] = "omp exited"
-	list, err := reg.List(dir, map[Kind]string{KindBase: "pm_base_ready", KindProxy: "pm_return_facts"}, 10)
+	list, err := reg.List(dir, map[Kind][]string{KindBase: {"pm_base_ready"}, KindProxy: {"pm_return_facts"}}, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func TestListDerivesState(t *testing.T) {
 		t.Fatalf("base = %+v", base)
 	}
 
-	limited, err := reg.List(dir, map[Kind]string{KindBase: "pm_base_ready", KindProxy: "pm_return_facts"}, 1)
+	limited, err := reg.List(dir, map[Kind][]string{KindBase: {"pm_base_ready"}, KindProxy: {"pm_return_facts"}}, 1)
 	if err != nil || len(limited) != 1 || limited[0].ID != proxy.ID {
 		t.Fatalf("limited = %+v %v", limited, err)
 	}
@@ -91,7 +91,7 @@ func TestListParent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	list, err := NewRegistry().List(dir, map[Kind]string{KindBase: "pm_base_ready", KindProxy: "pm_return_facts"}, 10)
+	list, err := NewRegistry().List(dir, map[Kind][]string{KindBase: {"pm_base_ready"}, KindProxy: {"pm_return_facts"}}, 10)
 	if err != nil {
 		t.Fatal(err)
 	}

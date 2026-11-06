@@ -1,5 +1,5 @@
 base:
-  tool: pm_base_ready
+  tools: [pm_base_ready]
   opening: |
     你现在为仓库 {{.Repo}}（分支 {{.Branch}}）做准备：工作目录就是该仓库的检出。
     通读仓库：目录结构、入口、主要模块、配置与设计文档，记住各部分所在的文件与行号，以便之后回答问题时直接引用。
@@ -7,7 +7,7 @@ base:
     {{end}}读完后调用 pm_base_ready，summary 写这个仓库是什么、主要部分在哪些路径。
   continue: 你还没有调用 pm_base_ready。继续读仓库，读完后调用 pm_base_ready 结束本任务。
 proxy:
-  tool: pm_return_facts
+  tools: [pm_return_facts]
   opening: |
     议会席位 {{.Seat}} 在审议议题 {{.Agenda}} 时，请你代读仓库 {{.Repo}}，回答下面的问题：
 
@@ -16,3 +16,22 @@ proxy:
     只依据仓库里的内容作答。每条事实注明仓库内相对路径与行号，或设计书的章节。
     答完调用 pm_return_facts，facts 写全部事实（markdown）；这是结束本任务的唯一方式。
   continue: 你还没有调用 pm_return_facts。把已查到的事实连同路径与行号交给 pm_return_facts 结束本任务。
+query:
+  tools: [pm_reply, pm_replace, pm_escalate]
+  opening: |
+    正在实现 issue {{.Issue}}「{{.IssueTitle}}」的工人提出了一个决策询问（档位 {{.Tier}}），请你作为该仓库的守护者了结它。
+
+    实现 issue 正文：
+
+    {{.IssueBody}}
+
+    工人的询问：
+
+    {{.Question}}
+
+    先依据仓库内容与 issue 正文判断，再从下面三种方式中选一种了结询问：
+    - pm_reply：仓库与 issue 已足以决定，直接答复工人，body 写答复（含依据的路径与行号）；
+    - pm_replace：原 issue 的要求本身需要改写，以新的实现 issue 取代它，title 写新标题，body 第一段写取代理由，之后写要做什么与验收方式；
+    - pm_escalate：需要议会决策（涉及产品方向、跨仓库或超出该 issue 所依据的决策），把它提为 PM 仓库里的议题，title 写议题标题，body 写需要议会决定什么及其背景。
+    调用其中一个工具是结束本任务的唯一方式。
+  continue: 你还没有了结这个询问。调用 pm_reply、pm_replace 或 pm_escalate 之一结束本任务。

@@ -70,8 +70,23 @@ func TestLoadExample(t *testing.T) {
 	if !ok {
 		t.Fatal("guardian missing")
 	}
-	if g.ToolsArg() != "read,grep,glob,find,pm_base_ready,pm_return_facts" {
+	if g.ToolsArg() != "read,grep,glob,find,pm_base_ready,pm_return_facts,pm_reply,pm_replace,pm_escalate" {
 		t.Fatalf("tools = %s", g.ToolsArg())
+	}
+	if got := strings.Join(cfg.Goals.Query.Tools, ","); got != "pm_reply,pm_replace,pm_escalate" {
+		t.Fatalf("query tools = %s", got)
+	}
+	if cfg.Project.Fields.Status.Options.InProgress != "In Progress" || cfg.Project.Fields.Agenda.Name != "Agenda" {
+		t.Fatalf("project = %+v", cfg.Project)
+	}
+	qo, _, err := cfg.Goals.Query.Render(QueryVars{Issue: "o/c#3", IssueTitle: "T", IssueBody: "B", Question: "Q?", Tier: TierSimple})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"o/c#3", "T", "B", "Q?", "simple"} {
+		if !strings.Contains(qo, want) {
+			t.Fatalf("query opening lacks %q: %s", want, qo)
+		}
 	}
 	if g.Prompt != filepath.Join(root, "guardians/omp/prompts/product-opus.md") {
 		t.Fatalf("prompt = %s", g.Prompt)
@@ -148,6 +163,21 @@ func TestLoadErrorsNameKeyPath(t *testing.T) {
 			"wrong type",
 			map[string][2]string{"guardians/runtime.yaml": {"maxConcurrentWarmups: 2", "maxConcurrentWarmups: two"}},
 			"guardians/runtime.yaml: maxConcurrentWarmups:",
+		},
+		{
+			"goal tool not a plugin tool",
+			map[string][2]string{"guardians/goals.yaml": {"tools: [pm_reply, pm_replace, pm_escalate]", "tools: [pm_reply, pm_answer]"}},
+			"guardians/goals.yaml: query.tools[1]: \"pm_answer\" is not a plugin tool",
+		},
+		{
+			"missing project option",
+			map[string][2]string{"shared/project.yaml": {", superseded: Superseded", ""}},
+			"shared/project.yaml: fields.status.options.superseded: missing",
+		},
+		{
+			"unknown project key",
+			map[string][2]string{"shared/project.yaml": {"agenda:   { name: Agenda }", "agenda:   { name: Agenda, options: {} }"}},
+			"shared/project.yaml: fields.agenda.options: unknown field",
 		},
 	}
 	for _, c := range cases {

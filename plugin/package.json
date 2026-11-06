@@ -1,0 +1,10 @@
+{
+	"name": "@oh-my-omp/pm-guardians-plugin",
+	"version": "0.1.0",
+	"private": true,
+	"description": "omp extension loaded by pm-guardians into every guardian omp session: PM goal tools, pm-meta entry and goal holding",
+	"type": "module",
+	"omp": {
+		"extensions": ["./index.ts"]
+	}
+}

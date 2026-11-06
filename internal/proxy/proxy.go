@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/oh-my-omp/pm-guardians/internal/bases"
 	"github.com/oh-my-omp/pm-guardians/internal/checkout"
@@ -85,11 +86,11 @@ func (r *Runner) Read(ctx context.Context, req Request) (Result, error) {
 	if !ok {
 		return Result{}, reject(BaseNotReady, "guardian %s has no base for %s with model %s", route.Guardian, req.Repo, req.Model)
 	}
-	source, ok, err := r.bases.ForkSource(baseID)
+	source, err := r.bases.ForkSource(baseID)
 	if err != nil {
 		return Result{}, err
 	}
-	if !ok {
+	if source == nil {
 		return Result{}, reject(BaseNotReady, "base %s is not ready", baseID)
 	}
 	g, _ := r.cfg.Guardian(base.Guardian)
@@ -102,8 +103,8 @@ func (r *Runner) Read(ctx context.Context, req Request) (Result, error) {
 		OMP:   rt.OMP,
 		Model: base.Model, SystemPrompt: g.Prompt, Tools: g.ToolsArg(),
 		SessionDir: filepath.Join(rt.SessionsDir, "proxy", baseID), Cwd: r.co.Dir(base.Repo),
-		ForkFrom: source,
-		GoalTool: r.cfg.Goals.Proxy.Tool, Opening: opening, Continue: cont,
+		ForkFrom:  source.Path,
+		GoalTools: r.cfg.Goals.Proxy.Tools, Opening: opening, Continue: cont,
 		Meta: sessions.Meta{Kind: sessions.KindProxy, Ref: req.Agenda, Base: baseID, Model: base.Model, Seat: req.Seat},
 		MaxContinuePrompts: rt.MaxContinuePrompts,
 	})
@@ -118,7 +119,7 @@ func (r *Runner) Read(ctx context.Context, req Request) (Result, error) {
 		Facts string `json:"facts"`
 	}
 	if err := json.Unmarshal(res.Args, &args); err != nil {
-		return Result{}, &SessionFailed{Reason: fmt.Sprintf("%s arguments: %v", r.cfg.Goals.Proxy.Tool, err)}
+		return Result{}, &SessionFailed{Reason: fmt.Sprintf("%s arguments: %v", strings.Join(r.cfg.Goals.Proxy.Tools, "/"), err)}
 	}
 	return Result{Session: res.SessionID, Facts: args.Facts}, nil
 }

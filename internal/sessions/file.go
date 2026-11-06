@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/oh-my-omp/pm-guardians/internal/config"
 )
 
 // Kind is the kind of a guardian session.
@@ -18,15 +20,18 @@ type Kind string
 const (
 	KindBase  Kind = "base"
 	KindProxy Kind = "proxy"
+	KindQuery Kind = "query"
 )
 
 // Meta is the pm-meta custom entry the plugin appends from PM_META at session start.
 type Meta struct {
 	Kind        Kind         `json:"kind"`
 	Ref         string       `json:"ref,omitempty"`
+	Ask         int64        `json:"ask,omitempty"` // query: the ask comment id
 	Base        string       `json:"base"`
 	Model       string       `json:"model"`
 	Seat        string       `json:"seat,omitempty"`
+	Tier        config.Tier  `json:"tier,omitempty"`
 	Fingerprint *Fingerprint `json:"fingerprint,omitempty"`
 }
 
@@ -50,6 +55,18 @@ type File struct {
 	Meta          *Meta                // latest pm-meta entry
 	ToolOK        map[string]time.Time // tool name -> timestamp of its latest successful tool result
 	LastError     string               // errorMessage of the latest assistant message that failed
+}
+
+// GoalAt returns when the latest of tools succeeded, and whether any did.
+func (f *File) GoalAt(tools []string) (time.Time, bool) {
+	var at time.Time
+	var ok bool
+	for _, t := range tools {
+		if ts, done := f.ToolOK[t]; done && (!ok || ts.After(at)) {
+			at, ok = ts, true
+		}
+	}
+	return at, ok
 }
 
 // ErrNotSession marks a .jsonl file that is not an omp session file (no session header).

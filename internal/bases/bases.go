@@ -55,7 +55,7 @@ func (m *Manager) Dir(id string) string {
 // WarmMissing starts a warm run for every configured base without a ready session file.
 func (m *Manager) WarmMissing() error {
 	for _, b := range m.cfg.Bases {
-		ready, err := m.newestReady(b.ID)
+		ready, err := m.ForkSource(b.ID)
 		if err != nil {
 			return err
 		}
@@ -130,7 +130,7 @@ func (m *Manager) run(b config.Base) error {
 		OMP:   rt.OMP,
 		Model: b.Model, SystemPrompt: g.Prompt, Tools: g.ToolsArg(),
 		SessionDir: m.Dir(b.ID), Cwd: dir,
-		GoalTool: m.cfg.Goals.Base.Tool, Opening: opening, Continue: cont,
+		GoalTools: m.cfg.Goals.Base.Tools, Opening: opening, Continue: cont,
 		Meta:               sessions.Meta{Kind: sessions.KindBase, Base: b.ID, Model: b.Model, Fingerprint: &fp},
 		MaxContinuePrompts: rt.MaxContinuePrompts,
 	})
@@ -148,7 +148,7 @@ func (m *Manager) currentFingerprint(b config.Base, g config.Guardian) (sessions
 	return sessions.Fingerprint{Model: b.Model, PromptSha256: hex.EncodeToString(sum[:]), Tools: g.ToolsArg()}, nil
 }
 
-// scan returns the session files of base id, newest first, and the newest one in which the base
+// scan returns the session files of base id, newest first, and the newest one in which a base
 // goal tool succeeded (nil if none).
 func (m *Manager) scan(id string) (files []*sessions.File, ready *sessions.File, err error) {
 	files, err = sessions.ScanDir(m.Dir(id))
@@ -157,25 +157,17 @@ func (m *Manager) scan(id string) (files []*sessions.File, ready *sessions.File,
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].StartedAt.After(files[j].StartedAt) })
 	for _, f := range files {
-		if _, ok := f.ToolOK[m.cfg.Goals.Base.Tool]; ok {
+		if _, ok := f.GoalAt(m.cfg.Goals.Base.Tools); ok {
 			return files, f, nil
 		}
 	}
 	return files, nil, nil
 }
 
-func (m *Manager) newestReady(id string) (*sessions.File, error) {
+// ForkSource returns the newest ready session file of base id, nil when there is none.
+func (m *Manager) ForkSource(id string) (*sessions.File, error) {
 	_, ready, err := m.scan(id)
 	return ready, err
-}
-
-// ForkSource returns the newest ready session file of base id.
-func (m *Manager) ForkSource(id string) (string, bool, error) {
-	f, err := m.newestReady(id)
-	if err != nil || f == nil {
-		return "", false, err
-	}
-	return f.Path, true, nil
 }
 
 // View is one row of GET /v1/bases.
@@ -206,7 +198,8 @@ func (m *Manager) List(ctx context.Context) ([]View, error) {
 		m.mu.Unlock()
 
 		if ready != nil {
-			id, at := ready.ID, ready.ToolOK[m.cfg.Goals.Base.Tool]
+			id := ready.ID
+			at, _ := ready.GoalAt(m.cfg.Goals.Base.Tools)
 			v.Session, v.WarmedAt = &id, &at
 			g, _ := m.cfg.Guardian(b.Guardian)
 			current, err := m.currentFingerprint(b, g)

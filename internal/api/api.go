@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/oh-my-omp/pm-guardians/internal/asks"
 	"github.com/oh-my-omp/pm-guardians/internal/bases"
 	"github.com/oh-my-omp/pm-guardians/internal/config"
 	"github.com/oh-my-omp/pm-guardians/internal/proxy"
@@ -24,11 +25,12 @@ type Server struct {
 	reg       *sessions.Registry
 	bases     *bases.Manager
 	proxy     *proxy.Runner
+	asks      *asks.Runner
 	startedAt time.Time
 }
 
-func New(cfg *config.Config, reg *sessions.Registry, b *bases.Manager, p *proxy.Runner, startedAt time.Time) *Server {
-	return &Server{cfg: cfg, reg: reg, bases: b, proxy: p, startedAt: startedAt}
+func New(cfg *config.Config, reg *sessions.Registry, b *bases.Manager, p *proxy.Runner, a *asks.Runner, startedAt time.Time) *Server {
+	return &Server{cfg: cfg, reg: reg, bases: b, proxy: p, asks: a, startedAt: startedAt}
 }
 
 // Handler returns the API routes wrapped with CORS headers.
@@ -38,6 +40,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/bases", s.listBases)
 	mux.HandleFunc("POST /v1/bases/{id}/rewarm", s.rewarm)
 	mux.HandleFunc("POST /v1/proxy-reads", s.proxyRead)
+	mux.HandleFunc("POST /v1/asks", s.submitAsk)
 	mux.HandleFunc("GET /v1/sessions", s.listSessions)
 	mux.HandleFunc("GET /v1/sessions/{id}/log", s.sessionLog)
 	mux.HandleFunc("OPTIONS /", func(w http.ResponseWriter, r *http.Request) {
@@ -117,6 +120,46 @@ func rejection(r proxy.Rejection) (int, string) {
 	panic(fmt.Sprintf("unhandled proxy rejection %d", r))
 }
 
+func (s *Server) submitAsk(w http.ResponseWriter, r *http.Request) {
+	var req asks.Request
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "body: "+err.Error())
+		return
+	}
+	out, err := s.asks.Submit(r.Context(), req)
+	var rejected *asks.RejectedError
+	switch {
+	case errors.As(err, &rejected):
+		status, code := askRejection(rejected.Reason)
+		writeError(w, status, code, rejected.Message)
+		return
+	case err != nil:
+		writeError(w, http.StatusInternalServerError, "internal", err.Error())
+		return
+	}
+	body := map[string]string{"ask": strconv.FormatInt(req.Comment, 10)}
+	switch out {
+	case asks.Started:
+		writeJSON(w, http.StatusAccepted, body)
+	case asks.Exists:
+		writeJSON(w, http.StatusOK, body)
+	default:
+		panic(fmt.Sprintf("unhandled ask outcome %d", out))
+	}
+}
+
+func askRejection(r asks.Rejection) (int, string) {
+	switch r {
+	case asks.Invalid:
+		return http.StatusBadRequest, "invalid_request"
+	case asks.UnknownRepo:
+		return http.StatusNotFound, "unknown_repo"
+	case asks.BaseNotReady:
+		return http.StatusConflict, "base_not_ready"
+	}
+	panic(fmt.Sprintf("unhandled ask rejection %d", r))
+}
+
 func (s *Server) listSessions(w http.ResponseWriter, r *http.Request) {
 	limit := 100
 	if q := r.URL.Query().Get("limit"); q != "" {
@@ -127,9 +170,10 @@ func (s *Server) listSessions(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = n
 	}
-	goals := map[sessions.Kind]string{
-		sessions.KindBase:  s.cfg.Goals.Base.Tool,
-		sessions.KindProxy: s.cfg.Goals.Proxy.Tool,
+	goals := map[sessions.Kind][]string{
+		sessions.KindBase:  s.cfg.Goals.Base.Tools,
+		sessions.KindProxy: s.cfg.Goals.Proxy.Tools,
+		sessions.KindQuery: s.cfg.Goals.Query.Tools,
 	}
 	list, err := s.reg.List(s.cfg.Runtime.SessionsDir, goals, limit)
 	if err != nil {

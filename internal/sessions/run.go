@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -12,15 +13,16 @@ import (
 	"github.com/oh-my-omp/pm-guardians/omprpc"
 )
 
-// Spec is one omp session to run until its goal tool succeeds.
+// Spec is one omp session to run until one of its goal tools succeeds.
 type Spec struct {
 	OMP                        config.OMP
 	Model, SystemPrompt, Tools string
 	SessionDir, Cwd            string
-	ForkFrom                   string // base session file for forks; empty for bases
-	GoalTool                   string
+	ForkFrom                   string   // base session file for forks; empty for bases
+	GoalTools                  []string // any one succeeding completes the session
 	Opening, Continue          string
 	Meta                       Meta
+	Env                        []string // extra environment of the omp child, KEY=VALUE
 	MaxContinuePrompts         int
 }
 
@@ -82,17 +84,17 @@ func (r *Registry) Run(ctx context.Context, s Spec) (Result, error) {
 			Bin:  s.OMP.Bin,
 			Args: args,
 			Dir:  s.Cwd,
-			Env: []string{
+			Env: append([]string{
 				"PI_CODING_AGENT_DIR=" + s.OMP.AgentDir,
 				"PM_KIND=" + string(s.Meta.Kind),
-				"PM_GOAL_TOOL=" + s.GoalTool,
+				"PM_GOAL_TOOL=" + strings.Join(s.GoalTools, ","),
 				"PM_CONTINUE=" + s.Continue,
 				"PM_META=" + string(meta),
-			},
+			}, s.Env...),
 		},
 		Opening:            s.Opening,
 		Continue:           s.Continue,
-		GoalTools:          []string{s.GoalTool},
+		GoalTools:          s.GoalTools,
 		MaxContinuePrompts: s.MaxContinuePrompts,
 		ReadyTimeout:       s.OMP.ReadyTimeout(),
 		ExitGrace:          s.OMP.ExitGrace(),
@@ -132,8 +134,8 @@ type Summary struct {
 }
 
 // List derives session rows from every session file under dir, newest first, at most limit rows.
-// goalTools maps each kind to the tool whose success makes a session of that kind done.
-func (r *Registry) List(dir string, goalTools map[Kind]string, limit int) ([]Summary, error) {
+// goalTools maps each kind to the tools any one of whose success makes a session of that kind done.
+func (r *Registry) List(dir string, goalTools map[Kind][]string, limit int) ([]Summary, error) {
 	files, err := ScanDir(dir)
 	if err != nil {
 		return nil, err
@@ -166,7 +168,7 @@ func (r *Registry) List(dir string, goalTools map[Kind]string, limit int) ([]Sum
 		if reason, ok := r.failures[f.ID]; ok {
 			errText = reason
 		}
-		switch _, done := f.ToolOK[goalTools[s.Kind]]; {
+		switch _, done := f.GoalAt(goalTools[s.Kind]); {
 		case r.live[f.ID]:
 			s.State = "running"
 		case done:
@@ -174,7 +176,7 @@ func (r *Registry) List(dir string, goalTools map[Kind]string, limit int) ([]Sum
 		default:
 			s.State = "failed"
 			if errText == "" {
-				errText = "session ended without calling " + goalTools[s.Kind]
+				errText = "session ended without calling " + strings.Join(goalTools[s.Kind], " or ")
 			}
 		}
 		if s.State != "running" {

@@ -1,5 +1,5 @@
 // Package config loads and validates the guardians configuration under <config-root>:
-// guardians/{runtime,guardians,bases,routing,goals}.yaml and shared/repos.yaml.
+// guardians/{runtime,guardians,bases,routing,goals}.yaml and shared/{repos,project}.yaml.
 // Unknown keys and missing required keys are errors that name the file and the YAML key path.
 package config
 
@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"text/template"
 	"time"
@@ -19,11 +20,9 @@ import (
 	"github.com/goccy/go-yaml/token"
 )
 
-// PM tool names the plugin registers; every guardian omp child lists both after the guardian's tools.
-const (
-	BaseReadyTool   = "pm_base_ready"
-	ReturnFactsTool = "pm_return_facts"
-)
+// PMTools are the tools the plugin registers. Every guardian omp child, whatever its kind, lists
+// all of them after the guardian's tools, so bases and their forks share one tool set (contract §6).
+var PMTools = []string{"pm_base_ready", "pm_return_facts", "pm_reply", "pm_replace", "pm_escalate"}
 
 // Config is the validated configuration. All paths are absolute.
 type Config struct {
@@ -33,6 +32,7 @@ type Config struct {
 	Routes    []Route
 	Goals     Goals
 	Repos     Repos
+	Project   ProjectConfig
 }
 
 type Runtime struct {
@@ -67,7 +67,7 @@ type Guardian struct {
 
 // ToolsArg is the --tools value shared by a guardian's bases and every fork of them.
 func (g Guardian) ToolsArg() string {
-	return strings.Join(append(append([]string(nil), g.Tools...), BaseReadyTool, ReturnFactsTool), ",")
+	return strings.Join(append(append([]string(nil), g.Tools...), PMTools...), ",")
 }
 
 // Base is one (guardian, repo, model) base session, expanded from a bases.yaml entry.
@@ -97,17 +97,47 @@ type Tiers struct {
 	Complex string `yaml:"complex"`
 }
 
+// Tier is the tier of an ask (contract §2 `ask.tier`).
+type Tier string
+
+const (
+	TierSimple  Tier = "simple"
+	TierComplex Tier = "complex"
+)
+
+// ParseTier returns the tier named s.
+func ParseTier(s string) (Tier, bool) {
+	switch t := Tier(s); t {
+	case TierSimple, TierComplex:
+		return t, true
+	}
+	return "", false
+}
+
+// Model returns the route's model for tier.
+func (t Tiers) Model(tier Tier) string {
+	switch tier {
+	case TierSimple:
+		return t.Simple
+	case TierComplex:
+		return t.Complex
+	}
+	panic(fmt.Sprintf("unhandled tier %q", tier))
+}
+
 // Goals holds one Goal per session kind.
 type Goals struct {
 	Base  Goal `yaml:"base"`
 	Proxy Goal `yaml:"proxy"`
+	Query Goal `yaml:"query"`
 }
 
-// Goal is the completion tool of a session kind and its message templates.
+// Goal is the completion tools of a session kind (any one succeeding completes the session)
+// and its message templates.
 type Goal struct {
-	Tool     string `yaml:"tool"`
-	Opening  string `yaml:"opening"`
-	Continue string `yaml:"continue"`
+	Tools    []string `yaml:"tools"`
+	Opening  string   `yaml:"opening"`
+	Continue string   `yaml:"continue"`
 
 	opening, cont *template.Template
 }
@@ -117,6 +147,12 @@ type BaseVars struct{ Repo, Branch, Focus string }
 
 // ProxyVars are the template fields of the proxy goal.
 type ProxyVars struct{ Seat, Agenda, Repo, Question string }
+
+// QueryVars are the template fields of the query goal.
+type QueryVars struct {
+	Issue, IssueTitle, IssueBody, Question string
+	Tier                                   Tier
+}
 
 // Render executes the goal's opening and continue templates.
 func (g Goal) Render(vars any) (opening, cont string, err error) {
@@ -143,21 +179,71 @@ type PMRepo struct {
 }
 
 type Project struct {
-	Owner  string `yaml:"owner"`
-	Number int    `yaml:"number"`
+	Owner  string `yaml:"owner" json:"owner"`
+	Number int    `yaml:"number" json:"number"`
 }
 
 type CodeRepo struct {
-	Repo string `yaml:"repo"`
-	Cwd  string `yaml:"cwd"`
+	Repo string `yaml:"repo" json:"repo"`
+	Cwd  string `yaml:"cwd" json:"cwd"`
+}
+
+// CodeRepo returns the code[] entry of repo.
+func (r Repos) CodeRepo(repo string) (CodeRepo, bool) {
+	for _, c := range r.Code {
+		if c.Repo == repo {
+			return c, true
+		}
+	}
+	return CodeRepo{}, false
+}
+
+// ProjectConfig is shared/project.yaml: the Project field and option names (appendix B). The json
+// tags equal the yaml keys, so the plugin receives the same shape in PM_GITHUB.
+type ProjectConfig struct {
+	Fields ProjectFields `yaml:"fields" json:"fields"`
+}
+
+type ProjectFields struct {
+	Status   SelectField[StatusOptions]   `yaml:"status" json:"status"`
+	Kind     SelectField[KindOptions]     `yaml:"kind" json:"kind"`
+	Agenda   NamedField                   `yaml:"agenda" json:"agenda"`
+	Proposer SelectField[ProposerOptions] `yaml:"proposer" json:"proposer"`
+}
+
+// SelectField is a single-select Project field: its name and the names of its options.
+type SelectField[O any] struct {
+	Name    string `yaml:"name" json:"name"`
+	Options O      `yaml:"options" json:"options"`
+}
+
+type NamedField struct {
+	Name string `yaml:"name" json:"name"`
+}
+
+type StatusOptions struct {
+	Todo       string `yaml:"todo" json:"todo"`
+	InProgress string `yaml:"inProgress" json:"inProgress"`
+	Done       string `yaml:"done" json:"done"`
+	Superseded string `yaml:"superseded" json:"superseded"`
+}
+
+type KindOptions struct {
+	Human          string `yaml:"human" json:"human"`
+	Agenda         string `yaml:"agenda" json:"agenda"`
+	Implementation string `yaml:"implementation" json:"implementation"`
+}
+
+type ProposerOptions struct {
+	Human        string `yaml:"human" json:"human"`
+	Guardians    string `yaml:"guardians" json:"guardians"`
+	Coordination string `yaml:"coordination" json:"coordination"`
 }
 
 // Readable reports whether repo is listed in code, design or omp.
 func (r Repos) Readable(repo string) bool {
-	for _, c := range r.Code {
-		if c.Repo == repo {
-			return true
-		}
+	if _, ok := r.CodeRepo(repo); ok {
+		return true
 	}
 	for _, list := range [][]string{r.Design, r.OMP} {
 		for _, name := range list {
@@ -234,6 +320,7 @@ func Load(root string) (*Config, error) {
 		rf  routingFile
 		gl  Goals
 		rep Repos
+		prj ProjectConfig
 	)
 	for _, f := range []struct {
 		rel string
@@ -245,6 +332,7 @@ func Load(root string) (*Config, error) {
 		{"guardians/routing.yaml", &rf},
 		{"guardians/goals.yaml", &gl},
 		{"shared/repos.yaml", &rep},
+		{"shared/project.yaml", &prj},
 	} {
 		if err := decodeFile(root, f.rel, f.dst); err != nil {
 			return nil, err
@@ -252,7 +340,7 @@ func Load(root string) (*Config, error) {
 	}
 
 	v := &validator{}
-	cfg := &Config{Runtime: rt, Guardians: gf.Guardians, Routes: rf.Routes, Goals: gl, Repos: rep}
+	cfg := &Config{Runtime: rt, Guardians: gf.Guardians, Routes: rf.Routes, Goals: gl, Repos: rep, Project: prj}
 	resolve := func(p string) string {
 		if p == "" || filepath.IsAbs(p) {
 			return p
@@ -301,6 +389,30 @@ func Load(root string) (*Config, error) {
 		f.present("omp", rep.OMP != nil)
 		for i, name := range rep.OMP {
 			f.repo(fmt.Sprintf("omp[%d]", i), name)
+		}
+	}
+
+	// shared/project.yaml
+	{
+		f := v.file("shared/project.yaml")
+		pf := prj.Fields
+		for _, s := range []struct{ path, value string }{
+			{"fields.status.name", pf.Status.Name},
+			{"fields.status.options.todo", pf.Status.Options.Todo},
+			{"fields.status.options.inProgress", pf.Status.Options.InProgress},
+			{"fields.status.options.done", pf.Status.Options.Done},
+			{"fields.status.options.superseded", pf.Status.Options.Superseded},
+			{"fields.kind.name", pf.Kind.Name},
+			{"fields.kind.options.human", pf.Kind.Options.Human},
+			{"fields.kind.options.agenda", pf.Kind.Options.Agenda},
+			{"fields.kind.options.implementation", pf.Kind.Options.Implementation},
+			{"fields.agenda.name", pf.Agenda.Name},
+			{"fields.proposer.name", pf.Proposer.Name},
+			{"fields.proposer.options.human", pf.Proposer.Options.Human},
+			{"fields.proposer.options.guardians", pf.Proposer.Options.Guardians},
+			{"fields.proposer.options.coordination", pf.Proposer.Options.Coordination},
+		} {
+			f.str(s.path, s.value)
 		}
 	}
 
@@ -398,6 +510,7 @@ func Load(root string) (*Config, error) {
 		f := v.file("guardians/goals.yaml")
 		f.goal("base", &cfg.Goals.Base, BaseVars{})
 		f.goal("proxy", &cfg.Goals.Proxy, ProxyVars{})
+		f.goal("query", &cfg.Goals.Query, QueryVars{})
 	}
 
 	if err := errors.Join(v.errs...); err != nil {
@@ -465,7 +578,12 @@ func (f fileValidator) exists(path, file string) {
 }
 
 func (f fileValidator) goal(path string, g *Goal, sample any) {
-	f.str(path+".tool", g.Tool)
+	f.nonEmpty(path+".tools", len(g.Tools))
+	for i, t := range g.Tools {
+		if f.str(fmt.Sprintf("%s.tools[%d]", path, i), t) && !slices.Contains(PMTools, t) {
+			f.errorf(fmt.Sprintf("%s.tools[%d]", path, i), "%q is not a plugin tool (%s)", t, strings.Join(PMTools, ", "))
+		}
+	}
 	for _, t := range []struct {
 		key string
 		src string

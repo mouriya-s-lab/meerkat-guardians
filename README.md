@@ -41,7 +41,7 @@ Every response carries `Access-Control-Allow-Origin: *`; `OPTIONS` on any path r
 | `GET /v1/bases` | `[{"id","guardian","repo","model","state":"warming\|ready\|failed","session","warmedAt","error","stale","staleReason"}]` | — |
 | `POST /v1/bases/{id}/rewarm` | `202` | `404 unknown_base`, `409 warming` |
 | `POST /v1/proxy-reads` `{seat,model,repo,question,agenda}` | `200 {"session","facts"}` | `400 invalid_request`, `404 no_guardian`, `409 base_not_ready`, `502 session_failed` |
-| `GET /v1/sessions?limit=n` (default 100) | `[{"id","kind","label","model","startedAt","endedAt","state":"running\|done\|failed","error","ref"}]`, newest first | `400 invalid_request` |
+| `GET /v1/sessions?limit=n` (default 100) | `[{"id","kind","label","model","startedAt","endedAt","state":"running\|done\|failed","error","ref","parent"}]`, newest first; `parent` is the base session id a fork came from, `null` for bases | `400 invalid_request` |
 | `GET /v1/sessions/{id}/log` | the session file, `application/x-ndjson` | `404 unknown_session` |
 
 A base is `warming` while a warm run for it is live, `ready` when a session file in its directory holds a successful `pm_base_ready` result (`session`/`warmedAt` name the newest such file, which is also the fork source), and `failed` otherwise. `stale` compares the fingerprint recorded in the ready file's `pm-meta` entry (model, SHA-256 of the system prompt, `--tools`, checked-out commit) with the current configuration and the branch head on the remote (`git ls-remote`, at most once a minute per repository); a stale base stays the fork source until someone rewarms it.

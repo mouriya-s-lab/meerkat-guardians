@@ -4,8 +4,11 @@
 package config
 
 import (
+	"crypto/sha1"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -24,8 +27,10 @@ import (
 // all of them after the guardian's tools, so bases and their forks share one tool set (contract §6).
 var PMTools = []string{"pm_base_ready", "pm_return_facts", "pm_reply", "pm_replace", "pm_escalate"}
 
-// Config is the validated configuration. All paths are absolute.
+// Config is the validated configuration. All paths are absolute. Root is the configuration root that
+// relative file references resolve against; Manifest records what was read under it.
 type Config struct {
+	Root      string
 	Runtime   Runtime
 	Guardians []Guardian
 	Bases     []Base
@@ -33,6 +38,37 @@ type Config struct {
 	Goals     Goals
 	Repos     Repos
 	Project   ProjectConfig
+	Manifest  Manifest
+}
+
+// Manifest says what a load read: every file under the configuration root with the git blob sha of its
+// content (the id GitHub's contents API reports), sorted by path, and when the load ran. Host files the
+// configuration names (omp.extension, a prompt outside the root) are checked on the host and are not
+// listed.
+type Manifest struct {
+	LoadedAt time.Time `json:"loadedAt"`
+	Files    []FileSHA `json:"files"`
+}
+
+// FileSHA is one manifest entry: a path under the configuration root and its git blob sha.
+type FileSHA struct {
+	Path string `json:"path"`
+	SHA  string `json:"sha"`
+}
+
+// Violation is one validation error: the file it concerns, the YAML key path inside it (empty when the
+// whole file is at fault) and what is wrong. Its Error text is the startup error line.
+type Violation struct {
+	File    string `json:"file"`
+	Key     string `json:"key"`
+	Message string `json:"message"`
+}
+
+func (v Violation) Error() string {
+	if v.Key == "" {
+		return v.File + ": " + v.Message
+	}
+	return v.File + ": " + v.Key + ": " + v.Message
 }
 
 type Runtime struct {
@@ -316,8 +352,29 @@ var (
 	repoPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
 )
 
-// Load reads and validates the configuration under root.
+// Load reads and validates the configuration under root on disk. The violations are returned joined;
+// each one's text is the startup error line.
 func Load(root string) (*Config, error) {
+	cfg, vs := load(os.DirFS(root), root)
+	if len(vs) > 0 {
+		return nil, joinViolations(vs)
+	}
+	return cfg, nil
+}
+
+func joinViolations(vs []Violation) error {
+	errs := make([]error, len(vs))
+	for i, v := range vs {
+		errs[i] = v
+	}
+	return errors.Join(errs...)
+}
+
+// load reads and validates the configuration in fsys, whose directory on the host is root. It returns the
+// configuration as far as it was built together with every violation found; a file that cannot be read or
+// decoded stops the load there.
+func load(fsys fs.FS, root string) (*Config, []Violation) {
+	loadedAt := time.Now().UTC()
 	guardiansDir := filepath.Join(root, "guardians")
 	var (
 		rt  Runtime
@@ -328,7 +385,7 @@ func Load(root string) (*Config, error) {
 		rep Repos
 		prj ProjectConfig
 	)
-	v := &validator{files: map[string]*ast.File{}}
+	v := &validator{fsys: fsys, root: root, files: map[string]*ast.File{}, shas: map[string]string{}}
 	for _, f := range []struct {
 		rel string
 		dst any
@@ -341,14 +398,14 @@ func Load(root string) (*Config, error) {
 		{"shared/repos.yaml", &rep},
 		{"shared/project.yaml", &prj},
 	} {
-		file, err := decodeFile(root, f.rel, f.dst)
-		if err != nil {
-			return nil, err
+		file := v.decode(f.rel, f.dst)
+		if file == nil {
+			return nil, v.errs
 		}
 		v.files[f.rel] = file
 	}
 
-	cfg := &Config{Runtime: rt, Guardians: gf.Guardians, Routes: rf.Routes, Goals: gl, Repos: rep, Project: prj}
+	cfg := &Config{Root: root, Runtime: rt, Guardians: gf.Guardians, Routes: rf.Routes, Goals: gl, Repos: rep, Project: prj}
 	resolve := func(p string) string {
 		if p == "" || filepath.IsAbs(p) {
 			return p
@@ -376,7 +433,7 @@ func Load(root string) (*Config, error) {
 		r.OMP.AgentDir = resolve(r.OMP.AgentDir)
 		r.OMP.Extension = resolve(r.OMP.Extension)
 		if r.OMP.Extension != "" {
-			f.exists("omp.extension", r.OMP.Extension)
+			f.reference("omp.extension", r.OMP.Extension)
 		}
 	}
 
@@ -446,7 +503,7 @@ func Load(root string) (*Config, error) {
 			f.str(p+".prompt", g.Prompt)
 			g.Prompt = resolve(g.Prompt)
 			if g.Prompt != "" {
-				f.exists(p+".prompt", g.Prompt)
+				f.reference(p+".prompt", g.Prompt)
 			}
 			f.nonEmpty(p+".tools", len(g.Tools))
 			for j, t := range g.Tools {
@@ -522,17 +579,21 @@ func Load(root string) (*Config, error) {
 		f.goal("query", &cfg.Goals.Query, QueryVars{})
 	}
 
-	if err := errors.Join(v.errs...); err != nil {
-		return nil, err
+	if len(v.errs) > 0 {
+		return nil, v.errs
 	}
+	cfg.Manifest = v.manifest(loadedAt)
 	return cfg, nil
 }
 
-// validator collects every validation error; files holds each decoded file's syntax tree, so a
-// check can tell an absent key from a present one with a zero value.
+// validator collects every violation. files holds each decoded file's syntax tree, so a check can tell an
+// absent key from a present one with a zero value. shas holds the git blob sha of every file read under root.
 type validator struct {
-	errs  []error
+	fsys  fs.FS
+	root  string
+	errs  []Violation
 	files map[string]*ast.File
+	shas  map[string]string
 }
 
 type fileValidator struct {
@@ -553,7 +614,7 @@ func (f fileValidator) has(path string) bool {
 }
 
 func (f fileValidator) errorf(path, format string, args ...any) {
-	f.v.errs = append(f.v.errs, fmt.Errorf("%s: %s: %s", f.name, path, fmt.Sprintf(format, args...)))
+	f.v.errs = append(f.v.errs, Violation{File: f.name, Key: path, Message: fmt.Sprintf(format, args...)})
 }
 
 func (f fileValidator) missing(path string) { f.errorf(path, "missing") }
@@ -599,10 +660,29 @@ func (f fileValidator) repo(path, s string) bool {
 	return true
 }
 
-func (f fileValidator) exists(path, file string) {
-	if _, err := os.Stat(file); err != nil {
-		f.errorf(path, "%v", err)
+// reference checks that the file a key names can be read. abs is the reference resolved as at runtime. A
+// file inside the root is read through the source and recorded in the manifest; any other file is a host
+// file and is only stat'ed.
+func (f fileValidator) reference(path, abs string) {
+	if rel, ok := rootRel(f.v.root, abs); ok {
+		if _, err := f.v.read(rel); err != nil {
+			f.errorf(path, "%s", fsMessage(err))
+		}
+		return
 	}
+	if _, err := os.Stat(abs); err != nil {
+		f.errorf(path, "%s", fsMessage(err))
+	}
+}
+
+// rootRel returns the slash-separated path of abs under root, or false when abs is not inside root.
+func rootRel(root, abs string) (string, bool) {
+	rel, err := filepath.Rel(root, abs)
+	if err != nil {
+		return "", false
+	}
+	rel = filepath.ToSlash(rel)
+	return rel, fs.ValidPath(rel)
 }
 
 func (f fileValidator) goal(path string, g *Goal, sample any) {
@@ -633,20 +713,22 @@ func (f fileValidator) goal(path string, g *Goal, sample any) {
 	}
 }
 
-// decodeFile strictly decodes root/rel into dst and returns the file's syntax tree. Decode errors
-// are reported with the YAML key path.
-func decodeFile(root, rel string, dst any) (*ast.File, error) {
-	b, err := os.ReadFile(filepath.Join(root, rel))
+// decode strictly decodes the file at rel into dst and returns its syntax tree. A file that cannot be read or
+// decoded records its violation and returns nil. Decode errors are reported with the YAML key path.
+func (v *validator) decode(rel string, dst any) *ast.File {
+	b, err := v.read(rel)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", rel, err)
+		v.errs = append(v.errs, Violation{File: rel, Message: fsMessage(err)})
+		return nil
 	}
 	err = yaml.UnmarshalWithOptions(b, dst, yaml.DisallowUnknownField(), yaml.Strict())
 	if err == nil {
 		file, err := parser.ParseBytes(b, 0)
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", rel, err)
+			v.errs = append(v.errs, Violation{File: rel, Message: err.Error()})
+			return nil
 		}
-		return file, nil
+		return file
 	}
 	var ye interface {
 		GetMessage() string
@@ -654,11 +736,55 @@ func decodeFile(root, rel string, dst any) (*ast.File, error) {
 	}
 	if errors.As(err, &ye) && ye.GetToken() != nil {
 		if path := keyPath(b, ye.GetToken().Position); path != "" {
-			return nil, fmt.Errorf("%s: %s: %s", rel, path, ye.GetMessage())
+			v.errs = append(v.errs, Violation{File: rel, Key: path, Message: ye.GetMessage()})
+		} else {
+			v.errs = append(v.errs, Violation{File: rel, Message: fmt.Sprintf("line %d: %s", ye.GetToken().Position.Line, ye.GetMessage())})
 		}
-		return nil, fmt.Errorf("%s: line %d: %s", rel, ye.GetToken().Position.Line, ye.GetMessage())
+		return nil
 	}
-	return nil, fmt.Errorf("%s: %w", rel, err)
+	v.errs = append(v.errs, Violation{File: rel, Message: err.Error()})
+	return nil
+}
+
+// read returns the content of the file at rel under the source and records its git blob sha.
+func (v *validator) read(rel string) ([]byte, error) {
+	b, err := fs.ReadFile(v.fsys, rel)
+	if err != nil {
+		return nil, err
+	}
+	v.shas[rel] = blobSHA(b)
+	return b, nil
+}
+
+// manifest lists the files read, sorted by path.
+func (v *validator) manifest(loadedAt time.Time) Manifest {
+	files := make([]FileSHA, 0, len(v.shas))
+	for p, sha := range v.shas {
+		files = append(files, FileSHA{Path: p, SHA: sha})
+	}
+	slices.SortFunc(files, func(a, b FileSHA) int { return strings.Compare(a.Path, b.Path) })
+	return Manifest{LoadedAt: loadedAt, Files: files}
+}
+
+// blobSHA is the git blob id of content: the SHA-1 of "blob <len>\0" followed by the content.
+func blobSHA(content []byte) string {
+	h := sha1.New()
+	fmt.Fprintf(h, "blob %d\x00", len(content))
+	h.Write(content)
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// fsMessage is the reason in a file-system error, without the operation and the path it names. A missing
+// file reads the same whether the source is the disk or a candidate set.
+func fsMessage(err error) string {
+	if errors.Is(err, fs.ErrNotExist) {
+		return fs.ErrNotExist.Error()
+	}
+	var pe *fs.PathError
+	if errors.As(err, &pe) {
+		return pe.Err.Error()
+	}
+	return err.Error()
 }
 
 // keyPath returns the YAML path (without the leading "$.") of the node at pos.

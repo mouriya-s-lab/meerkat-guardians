@@ -16,7 +16,7 @@ Pepgent PM intent guardians: a Go daemon that keeps pre-warmed headless omp **ba
 | Env | Meaning |
 |---|---|
 | `FAKE_OMP_PLAN` | comma-separated steps `goal/text/retry/fatal/loop/stall/die`, one per prompt, the last repeating; `goal` calls the goal tool, `text` completes the turn with an assistant text message and no tool call, `retry`/`fatal` end it with a retryable/non-retryable error, `loop` keeps calling a non-goal tool and never completes, `stall` acknowledges the prompt and then writes and outputs nothing until killed, `die` writes the stderr tail and exits 3 |
-| `FAKE_OMP_GOAL` | the goal tool's name; default: the first entry of `PM_GOAL_TOOLS`, else `pm_return_facts` |
+| `FAKE_OMP_GOAL` | the goal tool's name; default: the first entry of the comma list the starting program hands its plugin, `PM_GOAL_TOOL` (pm-guardians) or `PM_GOAL_TOOLS` (pm-council), else `pm_return_facts` |
 | `FAKE_OMP_ARGS` | path of a JSON file whose object becomes the goal tool's arguments; default `{"facts": <prompt text>}` |
 | `FAKE_OMP_DELAY_MS` | delay before each step, in milliseconds |
 

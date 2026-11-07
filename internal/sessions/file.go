@@ -40,12 +40,14 @@ type Meta struct {
 }
 
 // Fingerprint records what a base was warmed with; forks share its prompt cache only while
-// model, system prompt, tools and the read commit are unchanged.
+// model, system prompt, tools and the read commit are unchanged, and behave as it did only while
+// the omp settings are unchanged. Records written before OMPSettingsSha256 existed carry it empty.
 type Fingerprint struct {
-	Model        string `json:"model"`
-	PromptSha256 string `json:"promptSha256"`
-	Tools        string `json:"tools"`
-	Commit       string `json:"commit"`
+	Model             string `json:"model"`
+	PromptSha256      string `json:"promptSha256"`
+	Tools             string `json:"tools"`
+	OMPSettingsSha256 string `json:"ompSettingsSha256"` // SHA-256 of <omp.agentDir>/config.yml
+	Commit            string `json:"commit"`
 }
 
 // File is what the program derives from one omp session file and the failure record the

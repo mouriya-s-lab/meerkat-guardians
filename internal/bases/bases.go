@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -149,20 +148,29 @@ func (m *Manager) currentFingerprint(b config.Base, g config.Guardian) (sessions
 	return sessions.Fingerprint{Model: b.Model, PromptSha256: hex.EncodeToString(sum[:]), Tools: g.ToolsArg()}, nil
 }
 
-// scan returns the session files of base id, newest first, and the newest one in which a base
-// goal tool succeeded (nil if none).
-func (m *Manager) scan(id string) (files []*sessions.File, ready *sessions.File, err error) {
-	files, err = sessions.ScanDir(m.Dir(id))
+// scan returns the newest session of base id and the newest one in which a base goal tool
+// succeeded (nil if none). It parses session files newest first and stops at the ready one.
+func (m *Manager) scan(id string) (newest, ready *sessions.File, err error) {
+	cands, err := sessions.Newest(m.Dir(id))
 	if err != nil {
 		return nil, nil, err
 	}
-	sort.Slice(files, func(i, j int) bool { return files[i].StartedAt.After(files[j].StartedAt) })
-	for _, f := range files {
+	for _, c := range cands {
+		f, ok, err := c.Parse()
+		if err != nil {
+			return nil, nil, err
+		}
+		if !ok {
+			continue
+		}
+		if newest == nil {
+			newest = f
+		}
 		if _, ok := f.GoalAt(m.cfg.Goals.Base.Tools); ok {
-			return files, f, nil
+			return newest, f, nil
 		}
 	}
-	return files, nil, nil
+	return newest, nil, nil
 }
 
 // ForkSource returns the newest ready session file of base id, nil when there is none.
@@ -190,7 +198,7 @@ func (m *Manager) List(ctx context.Context) ([]View, error) {
 	out := make([]View, 0, len(m.cfg.Bases))
 	for _, b := range m.cfg.Bases {
 		v := View{ID: b.ID, Guardian: b.Guardian, Repo: b.Repo, Model: b.Model}
-		files, ready, err := m.scan(b.ID)
+		newest, ready, err := m.scan(b.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -218,11 +226,11 @@ func (m *Manager) List(ctx context.Context) ([]View, error) {
 		default:
 			v.State = "failed"
 			reason := failure
-			if reason == "" && len(files) > 0 {
-				reason = files[0].Failure
+			if reason == "" && newest != nil {
+				reason = newest.Failure
 			}
-			if reason == "" && len(files) > 0 {
-				reason = files[0].LastError
+			if reason == "" && newest != nil {
+				reason = newest.LastError
 			}
 			if reason == "" {
 				reason = "no ready session"

@@ -201,12 +201,12 @@ func TestListOrphanSupersededByFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	goals := map[Kind][]string{KindProxy: {"pm_return_facts"}}
-	files, err := ScanDir(dir)
+	cands, err := Newest(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(files) != 1 {
-		t.Fatalf("files = %+v", files)
+	if len(cands) != 1 {
+		t.Fatalf("candidates = %+v", cands)
 	}
 	list, err := NewRegistry().List(dir, goals, 10)
 	if err != nil {
@@ -240,12 +240,12 @@ func TestListOldFormatRecord(t *testing.T) {
 	if err := os.WriteFile(FailurePath(sessionFile), []byte(`{"reason":"omp exited","at":"2026-11-06T21:30:00Z"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	files, err := ScanDir(dir)
+	cands, err := Newest(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(files) != 0 {
-		t.Fatalf("old-format record without a file must not list, got %+v", files)
+	if len(cands) != 0 {
+		t.Fatalf("old-format record without a file must not list, got %+v", cands)
 	}
 	list, err := NewRegistry().List(dir, map[Kind][]string{KindBase: {"pm_base_ready"}}, 10)
 	if err != nil || len(list) != 0 {

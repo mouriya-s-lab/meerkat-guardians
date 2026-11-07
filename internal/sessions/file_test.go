@@ -72,7 +72,7 @@ func TestListDerivesState(t *testing.T) {
 		t.Fatal(err)
 	}
 	killedAt := time.Date(2026, 11, 6, 20, 0, 20, 5e6, time.UTC)
-	if err := writeFailure(timedOut, "session timeout after 20s", killedAt); err != nil {
+	if err := writeFailure(timedOut, failureRecord{Reason: "session timeout after 20s", At: killedAt}); err != nil {
 		t.Fatal(err)
 	}
 	goals := map[Kind][]string{KindBase: {"pm_base_ready"}, KindProxy: {"pm_return_facts"}}
@@ -137,5 +137,121 @@ func TestListParent(t *testing.T) {
 	}
 	if fork.Kind != KindProxy || fork.Parent == nil || *fork.Parent != base.ID {
 		t.Fatalf("fork = %+v, want parent %q", fork, base.ID)
+	}
+}
+
+// A failure record whose session file omp never wrote lists as its own row (§I): kind,
+// model, base label and startedAt come from what Run knew at launch, state is failed,
+// error is the reason, endedAt is the decision time.
+func TestListOrphanFailure(t *testing.T) {
+	dir := t.TempDir()
+	killedAt := time.Date(2026, 11, 7, 14, 0, 20, 0, time.UTC)
+	launchedAt := time.Date(2026, 11, 7, 14, 0, 0, 0, time.UTC)
+	sessionFile := filepath.Join(dir, "bases", "g", "r", "s.jsonl")
+	if err := os.MkdirAll(filepath.Dir(sessionFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeFailure(sessionFile, failureRecord{
+		Reason: "session timeout after 20s", At: killedAt,
+		ID: "orphan-1", Kind: KindBase, Base: "g/r", Model: "m", StartedAt: launchedAt,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	goals := map[Kind][]string{KindBase: {"pm_base_ready"}}
+	list, err := NewRegistry().List(dir, goals, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("list = %+v", list)
+	}
+	row := list[0]
+	if row.ID != "orphan-1" || row.Kind != KindBase || row.Model != "m" || row.Label != "base g/r" ||
+		row.State != "failed" || row.Parent != nil || row.Ref != nil {
+		t.Fatalf("orphan = %+v", row)
+	}
+	if row.Error == nil || *row.Error != "session timeout after 20s" {
+		t.Fatalf("orphan error = %+v", row.Error)
+	}
+	if row.StartedAt.IsZero() || !row.StartedAt.Equal(launchedAt) ||
+		row.EndedAt == nil || !row.EndedAt.Equal(killedAt) || !row.EndedAt.After(row.StartedAt) {
+		t.Fatalf("orphan times = %+v", row)
+	}
+	if _, ok, err := FindFile(dir, "orphan-1"); err != nil || ok {
+		t.Fatalf("FindFile orphan = %v %v", ok, err)
+	}
+}
+
+// When the session file appears after all, the file is authoritative: the same id lists
+// once, with the file's last entry as the end time and no orphan row beside it (§I).
+func TestListOrphanSupersededByFile(t *testing.T) {
+	dir := t.TempDir()
+	killedAt := time.Date(2026, 11, 7, 14, 0, 20, 0, time.UTC)
+	launchedAt := time.Date(2026, 11, 7, 14, 0, 0, 0, time.UTC)
+	sessionFile := filepath.Join(dir, "timedout.jsonl")
+	if err := os.WriteFile(sessionFile, []byte(
+		`{"type":"session","version":3,"id":"t-1","timestamp":"2026-11-06T20:00:00.000Z","cwd":"/c"}`+"\n"+
+			`{"type":"custom","customType":"pm-meta","data":{"kind":"proxy","ref":"o/a#1","base":"b","model":"m"},"id":"x","timestamp":"2026-11-06T20:00:01.000Z"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeFailure(sessionFile, failureRecord{
+		Reason: "session timeout after 20s", At: killedAt,
+		ID: "t-1", Kind: KindProxy, Base: "b", Ref: "o/a#1", Model: "m", StartedAt: launchedAt,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	goals := map[Kind][]string{KindProxy: {"pm_return_facts"}}
+	files, err := ScanDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 {
+		t.Fatalf("files = %+v", files)
+	}
+	list, err := NewRegistry().List(dir, goals, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].ID != "t-1" || list[0].State != "failed" {
+		t.Fatalf("list = %+v", list)
+	}
+	if list[0].StartedAt.IsZero() || !list[0].StartedAt.Equal(time.Date(2026, 11, 6, 20, 0, 0, 0, time.UTC)) {
+		t.Fatalf("file start wins = %+v", list[0])
+	}
+	if list[0].EndedAt == nil || !list[0].EndedAt.Equal(killedAt) {
+		t.Fatalf("failure end wins = %+v", list[0])
+	}
+	path, ok, err := FindFile(dir, "t-1")
+	if err != nil || !ok || path != sessionFile {
+		t.Fatalf("FindFile = %q %v %v", path, ok, err)
+	}
+}
+
+// Records predating the identity fields (reason and at only, e.g. TestListDerivesState's
+// base record) cannot name a session on their own, so they yield no extra row; the reason
+// still annotates the matching session file (§4 failure text survives).
+func TestListOldFormatRecord(t *testing.T) {
+	dir := t.TempDir()
+	sessionFile := filepath.Join(dir, "missing.jsonl")
+	parent := filepath.Dir(sessionFile)
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(FailurePath(sessionFile), []byte(`{"reason":"omp exited","at":"2026-11-06T21:30:00Z"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	files, err := ScanDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 0 {
+		t.Fatalf("old-format record without a file must not list, got %+v", files)
+	}
+	list, err := NewRegistry().List(dir, map[Kind][]string{KindBase: {"pm_base_ready"}}, 10)
+	if err != nil || len(list) != 0 {
+		t.Fatalf("list = %+v %v", list, err)
+	}
+	if _, ok, err := FindFile(dir, "missing"); err != nil || ok {
+		t.Fatalf("FindFile old-format = %v %v", ok, err)
 	}
 }

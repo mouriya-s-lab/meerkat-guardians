@@ -61,10 +61,25 @@ type File struct {
 	FailedAt      time.Time            // when the program decided it failed; zero for records without it
 }
 
-// failureRecord is the file at FailurePath. Records written before At existed lack it.
+// failureRecord is the file at FailurePath. It carries what Registry.Run knew from its Spec
+// when the session failed, so a session omp never wrote a file for still lists with its
+// identity. Records written before the identity fields existed carry only reason and at;
+// without an id they cannot name a session on their own.
 type failureRecord struct {
 	Reason string    `json:"reason"`
 	At     time.Time `json:"at,omitzero"` // RFC 3339
+	ID     string    `json:"id,omitzero"`
+	// Kind, Base, Ref, Seat, Ask, Tier and Model are what Registry.Run knew from its Spec
+	// when the session failed; StartedAt is when Run started it. They let List name a
+	// session whose .jsonl omp never wrote.
+	Kind      Kind        `json:"kind,omitzero"`
+	Base      string      `json:"base,omitzero"`
+	Ref       string      `json:"ref,omitzero"`
+	Seat      string      `json:"seat,omitzero"`
+	Ask       int64       `json:"ask,omitzero"`
+	Tier      config.Tier `json:"tier,omitzero"`
+	Model     string      `json:"model,omitzero"`
+	StartedAt time.Time   `json:"startedAt,omitzero"` // RFC 3339
 }
 
 // FailurePath is where the program records why and when its run of the session in the omp
@@ -75,9 +90,9 @@ func FailurePath(sessionFile string) string {
 	return strings.TrimSuffix(sessionFile, ".jsonl") + ".pm-failure.json"
 }
 
-// writeFailure records that the session in sessionFile failed at at for reason, atomically.
-func writeFailure(sessionFile, reason string, at time.Time) error {
-	b, err := json.Marshal(failureRecord{Reason: reason, At: at})
+// writeFailure records rec for the session in sessionFile, atomically.
+func writeFailure(sessionFile string, rec failureRecord) error {
+	b, err := json.Marshal(rec)
 	if err != nil {
 		return err
 	}
@@ -194,10 +209,13 @@ func ParseFile(path string) (*File, error) {
 	return f, nil
 }
 
-// ScanDir parses every session file under dir (recursively); other .jsonl files are skipped.
-// A missing dir yields no files.
+// ScanDir parses every session file under dir (recursively); other .jsonl files are
+// skipped. A failure record whose session file omp never wrote yields an entry of its own,
+// so a session killed before its first write still appears in the list. A missing dir
+// yields no files.
 func ScanDir(dir string) ([]*File, error) {
 	var files []*File
+	var orphans []string
 	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			if errors.Is(err, fs.ErrNotExist) {
@@ -205,20 +223,87 @@ func ScanDir(dir string) ([]*File, error) {
 			}
 			return err
 		}
-		if d.IsDir() || !strings.HasSuffix(path, ".jsonl") {
+		if d.IsDir() {
 			return nil
 		}
-		f, err := ParseFile(path)
-		if errors.Is(err, ErrNotSession) || errors.Is(err, fs.ErrNotExist) {
-			return nil
+		switch {
+		case strings.HasSuffix(path, ".jsonl"):
+			f, err := ParseFile(path)
+			if errors.Is(err, ErrNotSession) || errors.Is(err, fs.ErrNotExist) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			files = append(files, f)
+		case strings.HasSuffix(path, ".pm-failure.json"):
+			orphans = append(orphans, path)
 		}
-		if err != nil {
-			return err
-		}
-		files = append(files, f)
 		return nil
 	})
-	return files, err
+	if err != nil {
+		return nil, err
+	}
+	for _, recPath := range orphans {
+		f, ok, err := orphanFile(recPath)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			files = append(files, f)
+		}
+	}
+	return files, nil
+}
+
+// orphanFile derives the session the failure record at recPath names when its session file
+// does not exist. It reports false when the record is old-format (no id) or the session
+// file exists after all; either way there is no extra entry.
+func orphanFile(recPath string) (*File, bool, error) {
+	sessionFile := strings.TrimSuffix(recPath, ".pm-failure.json") + ".jsonl"
+	if _, err := os.Stat(sessionFile); err == nil {
+		return nil, false, nil
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return nil, false, err
+	}
+	b, err := os.ReadFile(recPath)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	var rec failureRecord
+	if err := json.Unmarshal(b, &rec); err != nil {
+		return nil, false, fmt.Errorf("%s: %w", recPath, err)
+	}
+	f := &File{Path: sessionFile, ToolOK: map[string]time.Time{}, Failure: rec.Reason, FailedAt: rec.At}
+	if !backfillMeta(f, rec) {
+		return nil, false, nil
+	}
+	return f, true, nil
+}
+
+// backfillMeta fills f.Meta from rec when the session file carries no pm-meta entry.
+// It reports whether the record named a session at all.
+func backfillMeta(f *File, rec failureRecord) bool {
+	if rec.ID == "" || rec.Kind == "" {
+		return false
+	}
+	f.Meta = &Meta{
+		Kind: rec.Kind, Base: rec.Base, Ref: rec.Ref, Seat: rec.Seat,
+		Ask: rec.Ask, Tier: rec.Tier, Model: rec.Model,
+	}
+	if f.ID == "" {
+		f.ID = rec.ID
+	}
+	if f.StartedAt.IsZero() {
+		f.StartedAt = rec.StartedAt
+	}
+	if f.LastAt.IsZero() {
+		f.LastAt = rec.StartedAt
+	}
+	return true
 }
 
 func parseTime(s string) time.Time {

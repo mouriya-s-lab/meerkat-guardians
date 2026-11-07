@@ -53,24 +53,26 @@ func TestParseForkFile(t *testing.T) {
 	}
 }
 
-// The failure reason comes from the record beside the session file, so a fresh Registry (a
-// restarted program) still reports it.
+// The failure reason and end time come from the record beside the session file, so a fresh
+// Registry (a restarted program) still reports them.
 func TestListDerivesState(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.CopyFS(dir, os.DirFS("testdata")); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeFailure(filepath.Join(dir, "base.jsonl"), "omp exited"); err != nil {
+	// A record written before records carried "at": the end time falls back to the last entry.
+	if err := os.WriteFile(FailurePath(filepath.Join(dir, "base.jsonl")), []byte(`{"reason":"omp exited"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// A proxy read that timed out: header and pm-meta, no goal tool result.
+	// A proxy read that timed out: header and pm-meta, no goal tool result, nothing after.
 	timedOut := filepath.Join(dir, "timedout.jsonl")
 	if err := os.WriteFile(timedOut, []byte(
 		`{"type":"session","version":3,"id":"t-1","timestamp":"2026-11-06T20:00:00.000Z","cwd":"/c"}`+"\n"+
 			`{"type":"custom","customType":"pm-meta","data":{"kind":"proxy","ref":"o/a#1","base":"b","model":"m"},"id":"x","timestamp":"2026-11-06T20:00:01.000Z"}`+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeFailure(timedOut, "session timeout after 20s"); err != nil {
+	killedAt := time.Date(2026, 11, 6, 20, 0, 20, 5e6, time.UTC)
+	if err := writeFailure(timedOut, "session timeout after 20s", killedAt); err != nil {
 		t.Fatal(err)
 	}
 	goals := map[Kind][]string{KindBase: {"pm_base_ready"}, KindProxy: {"pm_return_facts"}}
@@ -81,15 +83,28 @@ func TestListDerivesState(t *testing.T) {
 	if len(list) != 3 {
 		t.Fatalf("list = %+v", list) // other.jsonl is not a session file
 	}
+	lastAt := func(name string) time.Time {
+		f, err := ParseFile(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return f.LastAt
+	}
 	proxy, base, failed := list[0], list[1], list[2] // newest first
-	if proxy.Kind != KindProxy || proxy.State != "done" || proxy.Ref == nil || proxy.Label != "proxy "+*proxy.Ref || proxy.EndedAt == nil {
+	if proxy.Kind != KindProxy || proxy.State != "done" || proxy.Ref == nil || proxy.Label != "proxy "+*proxy.Ref ||
+		proxy.EndedAt == nil || !proxy.EndedAt.Equal(lastAt("proxy.jsonl")) {
 		t.Fatalf("proxy = %+v", proxy)
 	}
-	if base.Kind != KindBase || base.State != "done" || base.Ref != nil || base.Error == nil || *base.Error != "omp exited" {
+	if base.Kind != KindBase || base.State != "done" || base.Ref != nil || base.Error == nil || *base.Error != "omp exited" ||
+		base.EndedAt == nil || !base.EndedAt.Equal(lastAt("base.jsonl")) {
 		t.Fatalf("base = %+v", base)
 	}
-	if failed.Kind != KindProxy || failed.State != "failed" || failed.Error == nil || *failed.Error != "session timeout after 20s" {
+	if failed.Kind != KindProxy || failed.State != "failed" || failed.Error == nil || *failed.Error != "session timeout after 20s" ||
+		failed.EndedAt == nil || !failed.EndedAt.Equal(killedAt) {
 		t.Fatalf("timed-out proxy = %+v", failed)
+	}
+	if b, err := os.ReadFile(FailurePath(timedOut)); err != nil || string(b) != `{"reason":"session timeout after 20s","at":"2026-11-06T20:00:20.005Z"}` {
+		t.Fatalf("failure record = %s, %v", b, err)
 	}
 
 	limited, err := NewRegistry().List(dir, goals, 1)

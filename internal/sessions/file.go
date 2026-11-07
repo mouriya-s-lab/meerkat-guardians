@@ -58,23 +58,26 @@ type File struct {
 	ToolOK        map[string]time.Time // tool name -> timestamp of its latest successful tool result
 	LastError     string               // errorMessage of the latest assistant message that failed
 	Failure       string               // why the program's run of this session failed; see FailurePath
+	FailedAt      time.Time            // when the program decided it failed; zero for records without it
 }
 
-// failureRecord is the file at FailurePath.
+// failureRecord is the file at FailurePath. Records written before At existed lack it.
 type failureRecord struct {
-	Reason string `json:"reason"`
+	Reason string    `json:"reason"`
+	At     time.Time `json:"at,omitzero"` // RFC 3339
 }
 
-// FailurePath is where the program records why its run of the session in the omp session file
-// path failed (omp exited, a non-retryable error, the continue limit, the session timeout). omp
-// writes the session file; the program owns this record, so the reason outlives the process.
+// FailurePath is where the program records why and when its run of the session in the omp
+// session file path failed (omp exited, a non-retryable error, the continue limit, the session
+// timeout). omp writes the session file and stops writing it when killed; the program owns this
+// record, so the reason and the end time outlive the process.
 func FailurePath(sessionFile string) string {
 	return strings.TrimSuffix(sessionFile, ".jsonl") + ".pm-failure.json"
 }
 
-// writeFailure records reason for the session in sessionFile, atomically.
-func writeFailure(sessionFile, reason string) error {
-	b, err := json.Marshal(failureRecord{Reason: reason})
+// writeFailure records that the session in sessionFile failed at at for reason, atomically.
+func writeFailure(sessionFile, reason string, at time.Time) error {
+	b, err := json.Marshal(failureRecord{Reason: reason, At: at})
 	if err != nil {
 		return err
 	}
@@ -186,7 +189,7 @@ func ParseFile(path string) (*File, error) {
 		if err := json.Unmarshal(b, &rec); err != nil {
 			return nil, fmt.Errorf("%s: %w", FailurePath(path), err)
 		}
-		f.Failure = rec.Reason
+		f.Failure, f.FailedAt = rec.Reason, rec.At
 	}
 	return f, nil
 }

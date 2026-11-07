@@ -30,15 +30,16 @@ var PMTools = []string{"pm_base_ready", "pm_return_facts", "pm_reply", "pm_repla
 // Config is the validated configuration. All paths are absolute. Root is the configuration root that
 // relative file references resolve against; Manifest records what was read under it.
 type Config struct {
-	Root      string
-	Runtime   Runtime
-	Guardians []Guardian
-	Bases     []Base
-	Routes    []Route
-	Goals     Goals
-	Repos     Repos
-	Project   ProjectConfig
-	Manifest  Manifest
+	Root       string
+	Runtime    Runtime
+	Guardians  []Guardian
+	LaunchLink LaunchLink
+	Bases      []Base
+	Routes     []Route
+	Goals      Goals
+	Repos      Repos
+	Project    ProjectConfig
+	Manifest   Manifest
 }
 
 // Manifest says what a load read: every file under the configuration root with the git blob sha of its
@@ -110,6 +111,19 @@ type Guardian struct {
 // ToolsArg is the --tools value shared by a guardian's bases and every fork of them.
 func (g Guardian) ToolsArg() string {
 	return strings.Join(append(append([]string(nil), g.Tools...), PMTools...), ",")
+}
+
+// LaunchLink is the omp-dispatch launch link written into an implementation issue the plugin creates
+// with pm_replace: <base>/<owner>/<repo>/issues/<n>?spec=<{"cwd":<cwd>,"frontend":<frontend>}>. It
+// has pm-council's launchLink shape; every omp child receives it as PM_LAUNCH_LINK, in this JSON form.
+type LaunchLink struct {
+	Base     string   `yaml:"base" json:"base"`
+	Frontend Frontend `yaml:"frontend" json:"frontend"`
+}
+
+// Frontend is the dispatch frontend a launch link starts.
+type Frontend struct {
+	Kind string `yaml:"kind" json:"kind"`
 }
 
 // Base is one (guardian, repo, model) base session, expanded from a bases.yaml entry.
@@ -328,7 +342,8 @@ func (c *Config) Route(repo string) (Route, bool) {
 }
 
 type guardiansFile struct {
-	Guardians []Guardian `yaml:"guardians"`
+	Guardians  []Guardian `yaml:"guardians"`
+	LaunchLink LaunchLink `yaml:"launchLink"`
 }
 
 type basesFile struct {
@@ -405,7 +420,7 @@ func load(fsys fs.FS, root string) (*Config, []Violation) {
 		v.files[f.rel] = file
 	}
 
-	cfg := &Config{Root: root, Runtime: rt, Guardians: gf.Guardians, Routes: rf.Routes, Goals: gl, Repos: rep, Project: prj}
+	cfg := &Config{Root: root, Runtime: rt, Guardians: gf.Guardians, LaunchLink: gf.LaunchLink, Routes: rf.Routes, Goals: gl, Repos: rep, Project: prj}
 	resolve := func(p string) string {
 		if p == "" || filepath.IsAbs(p) {
 			return p
@@ -509,6 +524,12 @@ func load(fsys fs.FS, root string) (*Config, []Violation) {
 			for j, t := range g.Tools {
 				f.str(fmt.Sprintf("%s.tools[%d]", p, j), t)
 			}
+		}
+		if f.has("launchLink") {
+			f.url("launchLink.base", cfg.LaunchLink.Base)
+			f.str("launchLink.frontend.kind", cfg.LaunchLink.Frontend.Kind)
+		} else {
+			f.missing("launchLink")
 		}
 	}
 
@@ -658,6 +679,12 @@ func (f fileValidator) repo(path, s string) bool {
 		return false
 	}
 	return true
+}
+
+func (f fileValidator) url(path, s string) {
+	if f.str(path, s) && !strings.HasPrefix(s, "http://") && !strings.HasPrefix(s, "https://") {
+		f.errorf(path, "%q is not an http(s) URL", s)
+	}
 }
 
 // reference checks that the file a key names can be read. abs is the reference resolved as at runtime. A

@@ -131,6 +131,20 @@ func TestCheckReportsViolations(t *testing.T) {
 			},
 			Violation{File: "guardians/bases.yaml", Message: "file does not exist"},
 		},
+		{
+			"missing launch link",
+			func(t *testing.T, files map[string]string) {
+				replace(t, files, "guardians/guardians.yaml", "launchLink:\n  base: http://127.0.0.1:47591\n  frontend: { kind: tern }\n", "")
+			},
+			Violation{File: "guardians/guardians.yaml", Key: "launchLink", Message: "missing"},
+		},
+		{
+			"launch link base not http(s)",
+			func(t *testing.T, files map[string]string) {
+				replace(t, files, "guardians/guardians.yaml", "base: http://127.0.0.1:47591", "base: ftp://127.0.0.1:47599")
+			},
+			Violation{File: "guardians/guardians.yaml", Key: "launchLink.base", Message: `"ftp://127.0.0.1:47599" is not an http(s) URL`},
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

@@ -49,7 +49,7 @@ func run(root string) error {
 		return err
 	}
 	startedAt := time.Now().UTC()
-	reg := sessions.NewRegistry()
+	reg := sessions.NewRegistry(cfg.LaunchLink)
 	co := checkout.New(cfg.Runtime.CheckoutsDir)
 	bm := bases.New(cfg, reg, co)
 	pr := proxy.New(cfg, reg, bm, co)

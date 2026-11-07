@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/oh-my-omp/pm-guardians/internal/config"
 )
 
 // testdata/base.jsonl and testdata/proxy.jsonl are real omp 18.17 session files written by a
@@ -76,7 +78,7 @@ func TestListDerivesState(t *testing.T) {
 		t.Fatal(err)
 	}
 	goals := map[Kind][]string{KindBase: {"pm_base_ready"}, KindProxy: {"pm_return_facts"}}
-	list, err := NewRegistry().List(dir, goals, 10)
+	list, err := NewRegistry(config.LaunchLink{}).List(dir, goals, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +109,7 @@ func TestListDerivesState(t *testing.T) {
 		t.Fatalf("failure record = %s, %v", b, err)
 	}
 
-	limited, err := NewRegistry().List(dir, goals, 1)
+	limited, err := NewRegistry(config.LaunchLink{}).List(dir, goals, 1)
 	if err != nil || len(limited) != 1 || limited[0].ID != proxy.ID {
 		t.Fatalf("limited = %+v %v", limited, err)
 	}
@@ -124,7 +126,7 @@ func TestListParent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	list, err := NewRegistry().List(dir, map[Kind][]string{KindBase: {"pm_base_ready"}, KindProxy: {"pm_return_facts"}}, 10)
+	list, err := NewRegistry(config.LaunchLink{}).List(dir, map[Kind][]string{KindBase: {"pm_base_ready"}, KindProxy: {"pm_return_facts"}}, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +160,7 @@ func TestListOrphanFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	goals := map[Kind][]string{KindBase: {"pm_base_ready"}}
-	list, err := NewRegistry().List(dir, goals, 10)
+	list, err := NewRegistry(config.LaunchLink{}).List(dir, goals, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,7 +210,7 @@ func TestListOrphanSupersededByFile(t *testing.T) {
 	if len(cands) != 1 {
 		t.Fatalf("candidates = %+v", cands)
 	}
-	list, err := NewRegistry().List(dir, goals, 10)
+	list, err := NewRegistry(config.LaunchLink{}).List(dir, goals, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,7 +249,7 @@ func TestListOldFormatRecord(t *testing.T) {
 	if len(cands) != 0 {
 		t.Fatalf("old-format record without a file must not list, got %+v", cands)
 	}
-	list, err := NewRegistry().List(dir, map[Kind][]string{KindBase: {"pm_base_ready"}}, 10)
+	list, err := NewRegistry(config.LaunchLink{}).List(dir, map[Kind][]string{KindBase: {"pm_base_ready"}}, 10)
 	if err != nil || len(list) != 0 {
 		t.Fatalf("list = %+v %v", list, err)
 	}

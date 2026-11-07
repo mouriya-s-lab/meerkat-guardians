@@ -3,3 +3,6 @@ guardians:
     description: 产品守护者：读代码与设计书，回答议会与工人关于仓库现状的问题
     prompt: omp/prompts/product-opus.md
     tools: [read, grep, glob]
+launchLink:
+  base: http://127.0.0.1:47591
+  frontend: { kind: tern }

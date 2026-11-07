@@ -101,10 +101,43 @@ function marker(kind: string, data: Record<string, unknown>): string {
 	return `\n\n<!-- pm:${kind} ${JSON.stringify({ v: 1, ...data })} -->`;
 }
 
-function parseMarker(body: string | null): { kind: string; data: Record<string, unknown> } | null {
+/** Whitespace as String.prototype.trim sees it, so the marker line is found without copying the body. */
+function isSpace(c: number): boolean {
+	return (
+		(c >= 0x09 && c <= 0x0d) ||
+		c === 0x20 ||
+		c === 0xa0 ||
+		c === 0x1680 ||
+		(c >= 0x2000 && c <= 0x200a) ||
+		c === 0x2028 ||
+		c === 0x2029 ||
+		c === 0x202f ||
+		c === 0x205f ||
+		c === 0x3000 ||
+		c === 0xfeff
+	);
+}
+
+/** The end of s[0, end) without its trailing whitespace. */
+function textEnd(s: string, end: number): number {
+	while (end > 0 && isSpace(s.charCodeAt(end - 1))) end--;
+	return end;
+}
+
+/** True when s holds only whitespace. */
+function isBlankText(s: string): boolean {
+	for (let i = 0; i < s.length; i++) if (!isSpace(s.charCodeAt(i))) return false;
+	return true;
+}
+
+export function parseMarker(body: string | null): { kind: string; data: Record<string, unknown> } | null {
 	if (!body) return null;
-	const trimmed = body.trimEnd();
-	const m = MARKER_LINE.exec(trimmed.slice(trimmed.lastIndexOf("\n") + 1).trim());
+	const end = textEnd(body, body.length);
+	let from = end === 0 ? 0 : body.lastIndexOf("\n", end - 1) + 1;
+	let to = end;
+	while (from < to && isSpace(body.charCodeAt(from))) from++;
+	while (to > from && isSpace(body.charCodeAt(to - 1))) to--;
+	const m = MARKER_LINE.exec(body.slice(from, to));
 	if (!m) return null;
 	let data: unknown;
 	try {
@@ -118,41 +151,64 @@ function parseMarker(body: string | null): { kind: string; data: Record<string, 
 }
 
 /** Inserts line before the last line (the marker) of body. */
-function insertBeforeMarker(body: string, line: string): string {
-	const trimmed = body.trimEnd();
-	const i = trimmed.lastIndexOf("\n");
-	return `${trimmed.slice(0, i).trimEnd()}\n\n${line}\n\n${trimmed.slice(i + 1).trim()}`;
+export function insertBeforeMarker(body: string, line: string): string {
+	const end = textEnd(body, body.length);
+	const i = end === 0 ? -1 : body.lastIndexOf("\n", end - 1);
+	if (i < 0) {
+		let from = 0;
+		while (from < end && isSpace(body.charCodeAt(from))) from++;
+		const head = end <= 1 ? 0 : textEnd(body, end - 1);
+		return `${body.slice(0, head)}\n\n${line}\n\n${body.slice(from, end)}`;
+	}
+	let head = i;
+	while (head > 0 && isSpace(body.charCodeAt(head - 1))) head--;
+	return `${body.slice(0, head)}\n\n${line}\n\n${body.slice(i + 1, end).trim()}`;
 }
 
 // ---------------------------------------------------------------------------------------------
 // GitHub REST/GraphQL shapes read by the tools
 
+/** An issue, as far as the tools read one. */
 interface RestIssue {
 	number: number;
 	node_id: string;
 	html_url: string;
-	body: string | null;
-	pull_request?: unknown;
 }
 
-interface RestComment {
-	id: number;
-	html_url: string;
+/** An issue whose body the tools read: a created or reused issue. */
+interface RestIssueBody extends RestIssue {
 	body: string | null;
-	created_at: string;
 }
 
 type Settlement = { kind: "reply" | "replaced" | "escalated"; url: string };
 
-/** The settlement of ask among comments: a reply, replaced or escalated marker naming it. */
-function settlement(comments: RestComment[], ask: number): Settlement | null {
+/** A comment the marker scan kept: its url and the body's last line, the only part a marker occupies. */
+interface MarkerComment {
+	url: string;
+	line: string;
+}
+
+/** The settlement of ask among the scan's markers: a reply, replaced or escalated marker naming it. */
+function settlement(comments: MarkerComment[], ask: number): Settlement | null {
 	for (const c of comments) {
-		const m = parseMarker(c.body);
+		const m = parseMarker(c.line);
 		if (!m || m.data.ask !== ask) continue;
-		if (m.kind === "reply" || m.kind === "replaced" || m.kind === "escalated") return { kind: m.kind, url: c.html_url };
+		if (m.kind === "reply" || m.kind === "replaced" || m.kind === "escalated") return { kind: m.kind, url: c.url };
 	}
 	return null;
 }
+
+/** The whitespace `isSpace` recognises, as a jq character class for the scan's own trimming. */
+const JQ_SPACE = String.raw`[ \t\n\r\f\u000b\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]`;
+
+/**
+ * jq prelude of the list scans: `bodyline` is the body's last line as `parseMarker` reads it,
+ * `marker` its marker, and every scan keeps only elements this prelude can match; `parseMarker`
+ * re-checks each kept element in Node.
+ */
+const MARKER_SCAN = String.raw`def bodyline: (.body // "") | sub("${JQ_SPACE}+$"; "") | split("\n") | last | sub("^${JQ_SPACE}+"; "") | sub("${JQ_SPACE}+$"; "");
+def marker: (bodyline | capture("<!-- pm:(?<kind>[a-z]+) (?<json>[{].*[}]) -->")) // null;
+def mdata: (marker | .json | try fromjson catch null);`;
 
 function dispatchLink(ref: Ref, cwd: string): string {
 	const spec = encodeURIComponent(JSON.stringify({ cwd, frontend: { kind: "tern" } }));
@@ -188,8 +244,8 @@ export default function pmGuardians(pi: ExtensionAPI): void {
 
 	// --- gh --------------------------------------------------------------------------------
 
-	/** Runs `gh <args>`; a JSON body goes through a temp file and `--input`. Throws on failure. */
-	async function gh(args: string[], body?: unknown): Promise<unknown> {
+	/** Runs `gh <args>`; a JSON body goes through a temp file and `--input`. Returns the raw stdout. */
+	async function run(args: string[], body?: unknown): Promise<string> {
 		const argv = [...args];
 		let file: string | undefined;
 		if (body !== undefined) {
@@ -200,20 +256,34 @@ export default function pmGuardians(pi: ExtensionAPI): void {
 		try {
 			const r = await pi.exec("gh", argv);
 			if (r.code !== 0) throw new Error(`gh ${argv.join(" ")} exited ${r.code}: ${(r.stderr || r.stdout).trim()}`);
-			const out = r.stdout.trim();
-			return out === "" ? null : JSON.parse(out);
+			return r.stdout;
 		} finally {
 			if (file) await fs.rm(file, { force: true });
 		}
 	}
 
+	/** `gh <args>` decoded as one JSON value; whitespace-only output is null. */
+	async function gh(args: string[], body?: unknown): Promise<unknown> {
+		const out = await run(args, body);
+		return isBlankText(out) ? null : JSON.parse(out);
+	}
+
+	/** The endpoint's elements as `jq` projects them: one compact JSON object per line. */
+	async function scan<T>(jq: string, endpoint: string): Promise<T[]> {
+		const out = await run(["api", "--paginate", "--jq", jq, endpoint]);
+		const rows: T[] = [];
+		for (let at = 0; at < out.length; ) {
+			const nl = out.indexOf("\n", at);
+			const stop = nl < 0 ? out.length : nl;
+			if (stop > at) rows.push(JSON.parse(out.slice(at, stop)) as T);
+			if (nl < 0) break;
+			at = nl + 1;
+		}
+		return rows;
+	}
+
 	const rest = <T>(method: "GET" | "POST" | "PATCH", endpoint: string, body?: unknown) =>
 		gh(["api", "-X", method, endpoint], body) as Promise<T>;
-
-	async function paginate<T>(endpoint: string): Promise<T[]> {
-		const pages = (await gh(["api", "--paginate", "--slurp", endpoint])) as T[][];
-		return pages.flat();
-	}
 
 	async function graphql<T>(query: string, variables: Record<string, unknown>): Promise<T> {
 		const res = (await gh(["api", "graphql"], { query, variables })) as { data?: T; errors?: { message: string }[] };
@@ -223,7 +293,17 @@ export default function pmGuardians(pi: ExtensionAPI): void {
 		return res.data;
 	}
 
-	const comments = (ref: Ref) => paginate<RestComment>(`repos/${ref.repo}/issues/${ref.number}/comments?per_page=100`);
+	/** Comments on ref whose last line carries a marker for ask; nothing else leaves `gh`. */
+	const markers = (ref: Ref, ask: number) =>
+		scan<MarkerComment>(
+			`${MARKER_SCAN}
+.[]
+| select(type == "object")
+| (mdata) as $d
+| select($d != null and $d.v == 1 and $d.ask == ${ask})
+| {url: .html_url, line: bodyline}`,
+			`repos/${ref.repo}/issues/${ref.number}/comments?per_page=100`,
+		);
 
 	// --- Project ids, resolved by name once per process ----------------------------------------
 
@@ -369,9 +449,9 @@ export default function pmGuardians(pi: ExtensionAPI): void {
 		approval: "write",
 		async execute(_toolCallId, params) {
 			const q = parseQueryMeta(meta);
-			const existing = settlement(await comments(q.ref), q.ask);
+			const existing = settlement(await markers(q.ref, q.ask), q.ask);
 			if (existing) return alreadyRecorded("pm_reply", q, existing);
-			const c = await rest<RestComment>("POST", `repos/${q.ref.repo}/issues/${q.ref.number}/comments`, {
+			const c = await rest<{ html_url: string }>("POST", `repos/${q.ref.repo}/issues/${q.ref.number}/comments`, {
 				body: params.body + marker("reply", { ask: q.ask, decision: null }),
 			});
 			return complete("pm_reply", `Replied to ask ${q.ask} on ${q.ref.text}: ${c.html_url}`);
@@ -396,26 +476,35 @@ export default function pmGuardians(pi: ExtensionAPI): void {
 			const env = github();
 			const code = env.code.find(c => c.repo === q.ref.repo);
 			if (!code) throw new Error(`${q.ref.repo} is not a code repository in PM_GITHUB`);
-			const oldComments = await comments(q.ref);
-			const existing = settlement(oldComments, q.ask);
+			const existing = settlement(await markers(q.ref, q.ask), q.ask);
 			if (existing && existing.kind !== "replaced") return alreadyRecorded("pm_replace", q, existing);
 			const done: string[] = [];
 
 			// a. An issue an interrupted run already created for this ask.
-			const ask = await rest<RestComment>("GET", `repos/${q.ref.repo}/issues/comments/${q.ask}`);
-			const candidates = await paginate<RestIssue>(
+			const ask = await rest<{ created_at: string }>("GET", `repos/${q.ref.repo}/issues/comments/${q.ask}`);
+			const candidates = await scan<{ number: number; line: string }>(
+				`${MARKER_SCAN}
+.[]
+| select(type == "object" and .pull_request == null)
+| (marker) as $m
+| select($m != null and $m.kind == "replaces")
+| (mdata) as $d
+| select($d != null and $d.v == 1)
+| select($d.old == ${JSON.stringify(q.ref.text)} and $d.ask == ${q.ask})
+| {number: .number, line: bodyline}`,
 				`repos/${q.ref.repo}/issues?state=all&since=${encodeURIComponent(ask.created_at)}&per_page=100`,
 			);
-			let created = candidates.find(is => {
-				if (is.pull_request) return false;
-				const m = parseMarker(is.body);
+			const reused = candidates.find(c => {
+				const m = parseMarker(c.line);
 				return m?.kind === "replaces" && m.data.old === q.ref.text && m.data.ask === q.ask;
 			});
-			// b. Create it.
-			if (created) {
+			// b. Create it, or read the body of the one an interrupted run left.
+			let created: RestIssueBody;
+			if (reused) {
+				created = await rest<RestIssueBody>("GET", `repos/${q.ref.repo}/issues/${reused.number}`);
 				done.push(`reused new issue ${created.html_url}`);
 			} else {
-				created = await rest<RestIssue>("POST", `repos/${q.ref.repo}/issues`, {
+				created = await rest<RestIssueBody>("POST", `repos/${q.ref.repo}/issues`, {
 					title: params.title,
 					body: params.body + marker("replaces", { old: q.ref.text, ask: q.ask }),
 				});
@@ -468,14 +557,10 @@ export default function pmGuardians(pi: ExtensionAPI): void {
 			done.push(`Project ${f.kind.name}=${f.kind.options.implementation}, ${f.status.name}=${f.status.options.todo}`);
 
 			// e. The old issue: replaced marker, Status=Superseded, closed as not planned.
-			const replaced = oldComments.find(c => {
-				const m = parseMarker(c.body);
-				return m?.kind === "replaced" && m.data.ask === q.ask;
-			});
-			if (replaced) {
-				done.push(`old issue already has the replaced marker ${replaced.html_url}`);
+			if (existing) {
+				done.push(`old issue already has the replaced marker ${existing.url}`);
 			} else {
-				const c = await rest<RestComment>("POST", `repos/${q.ref.repo}/issues/${q.ref.number}/comments`, {
+				const c = await rest<{ html_url: string }>("POST", `repos/${q.ref.repo}/issues/${q.ref.number}/comments`, {
 					body: firstParagraph(params.body) + marker("replaced", { ask: q.ask, by: newRef.text }),
 				});
 				done.push(`replaced marker on the old issue ${c.html_url}`);
@@ -503,17 +588,29 @@ export default function pmGuardians(pi: ExtensionAPI): void {
 		async execute(_toolCallId, params) {
 			const q = parseQueryMeta(meta);
 			const env = github();
-			const existing = settlement(await comments(q.ref), q.ask);
+			const existing = settlement(await markers(q.ref, q.ask), q.ask);
 			if (existing) return alreadyRecorded("pm_escalate", q, existing);
 			const done: string[] = [];
 
-			const pmIssues = await paginate<RestIssue>(`repos/${env.pmRepo}/issues?state=all&per_page=100`);
-			let agenda = pmIssues.find(is => {
-				if (is.pull_request) return false;
-				const m = parseMarker(is.body);
+			const agendas = await scan<{ number: number; node_id: string; url: string; line: string }>(
+				`${MARKER_SCAN}
+.[]
+| select(type == "object" and .pull_request == null)
+| (marker) as $m
+| select($m != null and $m.kind == "escalation")
+| (mdata) as $d
+| select($d != null and $d.v == 1)
+| select($d.issue == ${JSON.stringify(q.ref.text)} and $d.ask == ${q.ask})
+| {number: .number, node_id: .node_id, url: .html_url, line: bodyline}`,
+				`repos/${env.pmRepo}/issues?state=all&per_page=100`,
+			);
+			const reused = agendas.find(a => {
+				const m = parseMarker(a.line);
 				return m?.kind === "escalation" && m.data.issue === q.ref.text && m.data.ask === q.ask;
 			});
-			if (agenda) {
+			let agenda: RestIssue;
+			if (reused) {
+				agenda = { number: reused.number, node_id: reused.node_id, html_url: reused.url };
 				done.push(`reused agenda issue ${agenda.html_url}`);
 			} else {
 				agenda = await rest<RestIssue>("POST", `repos/${env.pmRepo}/issues`, {
@@ -529,7 +626,7 @@ export default function pmGuardians(pi: ExtensionAPI): void {
 			await setOption(item, f.proposer.name, f.proposer.options.guardians);
 			done.push(`Project ${f.kind.name}=${f.kind.options.agenda}, ${f.proposer.name}=${f.proposer.options.guardians}`);
 
-			const c = await rest<RestComment>("POST", `repos/${q.ref.repo}/issues/${q.ref.number}/comments`, {
+			const c = await rest<{ html_url: string }>("POST", `repos/${q.ref.repo}/issues/${q.ref.number}/comments`, {
 				body: `该询问需要议会决策，已提为议题 ${agendaRef}；议会定案后以答复或取代了结。` + marker("escalated", { ask: q.ask, agenda: agendaRef }),
 			});
 			done.push(`escalated marker on ${q.ref.text} ${c.html_url}`);

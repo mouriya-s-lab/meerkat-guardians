@@ -70,7 +70,7 @@ func TestLoadExample(t *testing.T) {
 	if !ok {
 		t.Fatal("guardian missing")
 	}
-	if g.ToolsArg() != "read,grep,glob,find,pm_base_ready,pm_return_facts,pm_reply,pm_replace,pm_escalate" {
+	if g.ToolsArg() != "read,grep,glob,pm_base_ready,pm_return_facts,pm_reply,pm_replace,pm_escalate" {
 		t.Fatalf("tools = %s", g.ToolsArg())
 	}
 	if got := strings.Join(cfg.Goals.Query.Tools, ","); got != "pm_reply,pm_replace,pm_escalate" {

@@ -161,9 +161,10 @@ func fileSha256(path string) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
-// scan returns the newest session of base id and the newest one in which a base goal tool
-// succeeded (nil if none). It parses session files newest first and stops at the ready one.
-func (m *Manager) scan(id string) (newest, ready *sessions.File, err error) {
+// scan returns the sessions of base id parsed so far, newest first, and the newest one in which
+// a base goal tool succeeded (nil if none). It parses session files newest first and stops at
+// the ready one, so the list ends with it.
+func (m *Manager) scan(id string) (files []*sessions.File, ready *sessions.File, err error) {
 	cands, err := sessions.Newest(m.Dir(id))
 	if err != nil {
 		return nil, nil, err
@@ -176,14 +177,12 @@ func (m *Manager) scan(id string) (newest, ready *sessions.File, err error) {
 		if !ok {
 			continue
 		}
-		if newest == nil {
-			newest = f
-		}
+		files = append(files, f)
 		if _, ok := f.GoalAt(m.cfg.Goals.Base.Tools); ok {
-			return newest, f, nil
+			return files, f, nil
 		}
 	}
-	return newest, nil, nil
+	return files, nil, nil
 }
 
 // ForkSource returns the newest ready session file of base id, nil when there is none.
@@ -204,6 +203,50 @@ type View struct {
 	Error       *string    `json:"error"`
 	Stale       bool       `json:"stale"`
 	StaleReason string     `json:"staleReason"`
+	LastWarm    *LastWarm  `json:"lastWarm"`
+}
+
+// WarmOutcome is how a warm attempt ended.
+type WarmOutcome string
+
+const (
+	WarmDone   WarmOutcome = "done"
+	WarmFailed WarmOutcome = "failed"
+)
+
+// LastWarm is the latest warm attempt of a base that left a trace in its session directory:
+// a ready session (At is its goal time, the base's warmedAt) or a failure record (At and Error
+// are the record's). Error is nil for a done attempt.
+type LastWarm struct {
+	At      time.Time   `json:"at"`
+	Outcome WarmOutcome `json:"outcome"`
+	Error   *string     `json:"error"`
+}
+
+// lastWarm returns the later of the ready session's goal time and the newest failure record
+// among files, nil when there is neither. A live warm run has neither yet, so the previous
+// attempt stands until it ends. Records written without "at" date from the session file's
+// last entry, as in /v1/sessions.
+func lastWarm(files []*sessions.File, ready *sessions.File, goalTools []string) *LastWarm {
+	var lw *LastWarm
+	if ready != nil {
+		at, _ := ready.GoalAt(goalTools)
+		lw = &LastWarm{At: at, Outcome: WarmDone}
+	}
+	for _, f := range files {
+		if f.Failure == "" {
+			continue
+		}
+		at := f.FailedAt
+		if at.IsZero() {
+			at = f.LastAt
+		}
+		if lw == nil || at.After(lw.At) {
+			reason := f.Failure
+			lw = &LastWarm{At: at, Outcome: WarmFailed, Error: &reason}
+		}
+	}
+	return lw
 }
 
 // List derives the state of every configured base.
@@ -211,13 +254,14 @@ func (m *Manager) List(ctx context.Context) ([]View, error) {
 	out := make([]View, 0, len(m.cfg.Bases))
 	for _, b := range m.cfg.Bases {
 		v := View{ID: b.ID, Guardian: b.Guardian, Repo: b.Repo, Model: b.Model}
-		newest, ready, err := m.scan(b.ID)
+		files, ready, err := m.scan(b.ID)
 		if err != nil {
 			return nil, err
 		}
 		m.mu.Lock()
 		warming, failure := m.warming[b.ID], m.failure[b.ID]
 		m.mu.Unlock()
+		v.LastWarm = lastWarm(files, ready, m.cfg.Goals.Base.Tools)
 
 		if ready != nil {
 			id := ready.ID
@@ -239,11 +283,11 @@ func (m *Manager) List(ctx context.Context) ([]View, error) {
 		default:
 			v.State = "failed"
 			reason := failure
-			if reason == "" && newest != nil {
-				reason = newest.Failure
+			if reason == "" && len(files) > 0 {
+				reason = files[0].Failure
 			}
-			if reason == "" && newest != nil {
-				reason = newest.LastError
+			if reason == "" && len(files) > 0 {
+				reason = files[0].LastError
 			}
 			if reason == "" {
 				reason = "no ready session"

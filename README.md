@@ -15,12 +15,12 @@ Pepgent PM intent guardians: a Go daemon that keeps pre-warmed headless omp **ba
 
 | Env | Meaning |
 |---|---|
-| `FAKE_OMP_PLAN` | comma-separated steps `goal/text/retry/fatal/loop/die`, one per prompt, the last repeating; `goal` calls the goal tool, `text` completes the turn without one, `retry`/`fatal` end it with a retryable/non-retryable error, `loop` keeps calling a non-goal tool and never completes, `die` writes the stderr tail and exits 3 |
+| `FAKE_OMP_PLAN` | comma-separated steps `goal/text/retry/fatal/loop/stall/die`, one per prompt, the last repeating; `goal` calls the goal tool, `text` completes the turn with an assistant text message and no tool call, `retry`/`fatal` end it with a retryable/non-retryable error, `loop` keeps calling a non-goal tool and never completes, `stall` acknowledges the prompt and then writes and outputs nothing until killed, `die` writes the stderr tail and exits 3 |
 | `FAKE_OMP_GOAL` | the goal tool's name; default: the first entry of `PM_GOAL_TOOLS`, else `pm_return_facts` |
 | `FAKE_OMP_ARGS` | path of a JSON file whose object becomes the goal tool's arguments; default `{"facts": <prompt text>}` |
 | `FAKE_OMP_DELAY_MS` | delay before each step, in milliseconds |
 
-The only argument it consumes is `--session-dir <dir>`; it creates `<UTC time>_<uuid>.jsonl` there before the ready frame, writes the session header and appends an omp entry per tool call and result, and `get_state` answers with that path. Every other argument is ignored.
+It consumes two arguments, every other one is ignored. `--session-dir <dir>` (required) names where the session file `<UTC time>_<uuid>.jsonl` goes; `get_state` answers with that path from the start, and as in omp the file is created with the session's first assistant message (the session header, then omp's entries for each text message, tool call and result), so a session that stalls or fails before one has no file. `--fork <source file>` creates the file before the ready frame instead, with a header whose `parentSession` is the source header's `id`; the source's entries are not copied.
 
 ## Run locally
 

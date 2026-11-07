@@ -136,6 +136,7 @@ func TestRunSessionTimeout(t *testing.T) {
 	if elapsed < 1500*time.Millisecond || elapsed > 10*time.Second {
 		t.Fatalf("returned after %v", elapsed)
 	}
-	// The timed-out session still has its session file (acceptance row 2).
+	// loop's tool calls wrote assistant messages, so the timed-out session has its session
+	// file (acceptance row 2).
 	sessionEntries(t, sessDir)
 }

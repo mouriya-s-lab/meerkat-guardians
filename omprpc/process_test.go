@@ -3,6 +3,8 @@ package omprpc
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -90,14 +92,9 @@ func TestCallAndEvents(t *testing.T) {
 		!strings.HasSuffix(st.SessionFile, ".jsonl") {
 		t.Fatalf("get_state data %s, want a %s/<UTC>_<uuid>.jsonl named after its id", data, sessDir)
 	}
-	// The session file exists from before the ready frame, with get_state's id as its
-	// header id.
-	b, err := os.ReadFile(st.SessionFile)
-	if err != nil {
-		t.Fatalf("session file: %v", err)
-	}
-	if !strings.Contains(string(b), `"id":"`+st.SessionID+`"`) {
-		t.Fatalf("session header lacks get_state's id: %s", b)
+	// Like omp's, a fresh session has no file before its first assistant message.
+	if _, err := os.Stat(st.SessionFile); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("session file before the first assistant message: %v, want it absent", err)
 	}
 
 	if _, err := p.Call(ctx, map[string]any{"type": "bogus"}); err == nil ||
@@ -163,6 +160,15 @@ func TestCallAndEvents(t *testing.T) {
 	}
 	if result.Status != "error" || result.Error == nil || !result.Error.Retryable || result.Error.Message != "429 slow down" {
 		t.Fatalf("result = %+v", result)
+	}
+	// The text turn's assistant message created the file, with get_state's id as its header id.
+	b, err := os.ReadFile(st.SessionFile)
+	if err != nil {
+		t.Fatalf("session file after the goal turn: %v", err)
+	}
+	header, _, _ := strings.Cut(string(b), "\n")
+	if !strings.HasPrefix(header, `{"type":"session",`) || !strings.Contains(header, `"id":"`+st.SessionID+`"`) {
+		t.Fatalf("session header %s, want a session header with get_state's id", header)
 	}
 
 	if err := p.CloseStdin(); err != nil {

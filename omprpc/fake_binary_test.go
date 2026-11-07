@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,11 +21,8 @@ func TestFakeOmpBinary(t *testing.T) {
 		t.Fatalf("go build ./cmd/fake-omp: %v: %s", err, out)
 	}
 
-	drive := func(t *testing.T, sessDir string, env []string, maxDuration time.Duration) (SessionResult, error) {
-		t.Helper()
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		defer cancel()
-		return RunSession(ctx, SessionSpec{
+	spec := func(sessDir string, env []string, maxDuration time.Duration) SessionSpec {
+		return SessionSpec{
 			Options:            Options{Bin: bin, Args: []string{"--session-dir", sessDir}, Env: env},
 			Opening:            "open",
 			Continue:           "keep going",
@@ -33,7 +31,35 @@ func TestFakeOmpBinary(t *testing.T) {
 			ReadyTimeout:       10 * time.Second,
 			ExitGrace:          5 * time.Second,
 			MaxDuration:        maxDuration,
-		})
+		}
+	}
+	run := func(t *testing.T, s SessionSpec) (SessionResult, error) {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		return RunSession(ctx, s)
+	}
+	drive := func(t *testing.T, sessDir string, env []string, maxDuration time.Duration) (SessionResult, error) {
+		t.Helper()
+		return run(t, spec(sessDir, env, maxDuration))
+	}
+
+	// header decodes the session file's first line.
+	type header struct {
+		Type, ID, ParentSession string
+	}
+	readHeader := func(t *testing.T, path string) header {
+		t.Helper()
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		line, _, _ := strings.Cut(string(b), "\n")
+		var h header
+		if err := json.Unmarshal([]byte(line), &h); err != nil {
+			t.Fatalf("header line %s: %v", line, err)
+		}
+		return h
 	}
 
 	// sessionEntries decodes the session file: one line per entry, type+customType+role.
@@ -76,21 +102,107 @@ func TestFakeOmpBinary(t *testing.T) {
 		if err := os.WriteFile(argsFile, []byte(`{"facts":["one","two"]}`), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		res, err := drive(t, sessDir, []string{
+		s := spec(sessDir, []string{
 			"FAKE_OMP_PLAN=goal", "FAKE_OMP_GOAL=pm_return_facts", "FAKE_OMP_ARGS=" + argsFile,
 		}, 0)
+		// Like omp's, a fresh session has no file at ready; get_state already names it.
+		var readyErr error
+		s.OnReady = func(_, file string) { _, readyErr = os.Stat(file) }
+		res, err := run(t, s)
 		if err != nil {
 			t.Fatal(err)
+		}
+		if !errors.Is(readyErr, fs.ErrNotExist) {
+			t.Fatalf("session file at ready: %v, want it absent", readyErr)
 		}
 		if res.ToolName != "pm_return_facts" || string(res.Args) != `{"facts":["one","two"]}` {
 			t.Fatalf("RunSession = {tool %s args %s}, want the goal tool and the file's arguments", res.ToolName, res.Args)
 		}
-		// RunSession's session file is a real one: the header plus the goal call's omp
-		// entries, closing with the tool result.
+		// The first assistant message created the file at get_state's path: the header plus
+		// the goal call's omp entries, closing with the tool result.
+		if h := readHeader(t, res.SessionFile); h.Type != "session" || h.ID != res.SessionID || h.ParentSession != "" {
+			t.Fatalf("header = %+v, want a fresh session header with id %s", h, res.SessionID)
+		}
 		entries := sessionEntries(t, sessDir)
 		want := "session message:assistant custom:tool_execution_start custom:tool_execution_end message:toolResult"
 		if got := strings.Join(entries, " "); got != want {
 			t.Fatalf("session entries = %q, want %q", got, want)
+		}
+	})
+
+	// A text turn ends with an assistant text message, which creates a fresh session's file
+	// as omp's does. No continue prompt is allowed, so the session fails after that one turn.
+	t.Run("text", func(t *testing.T) {
+		sessDir := t.TempDir()
+		s := spec(sessDir, []string{"FAKE_OMP_PLAN=text"}, 0)
+		s.MaxContinuePrompts = 0
+		var (
+			readyID, readyFile string
+			readyErr           error
+		)
+		s.OnReady = func(id, file string) { readyID, readyFile = id, file; _, readyErr = os.Stat(file) }
+		_, err := run(t, s)
+		var f *SessionFailure
+		if !errors.As(err, &f) || f.Reason != "continue limit reached" {
+			t.Fatalf("err = %v, want continue limit reached", err)
+		}
+		if !errors.Is(readyErr, fs.ErrNotExist) {
+			t.Fatalf("session file at ready: %v, want it absent", readyErr)
+		}
+		if h := readHeader(t, readyFile); h.Type != "session" || h.ID != readyID {
+			t.Fatalf("header = %+v, want a session header with id %s", h, readyID)
+		}
+		if got := strings.Join(sessionEntries(t, sessDir), " "); got != "session message:assistant" {
+			t.Fatalf("session entries = %q, want the header and one assistant message", got)
+		}
+	})
+
+	// stall stops the turn before its first assistant message, so the session never gets a
+	// file: the failed session without one that the session lists must show (pm-guardians#26).
+	t.Run("stall", func(t *testing.T) {
+		sessDir := t.TempDir()
+		s := spec(sessDir, []string{"FAKE_OMP_PLAN=stall"}, 2*time.Second)
+		var readyFile string
+		s.OnReady = func(_, file string) { readyFile = file }
+		_, err := run(t, s)
+		var f *SessionFailure
+		if !errors.As(err, &f) || f.Reason != "session timeout after 2s" {
+			t.Fatalf("err = %v, want session timeout after 2s", err)
+		}
+		if !strings.HasPrefix(readyFile, sessDir+"/") || !strings.HasSuffix(readyFile, ".jsonl") {
+			t.Fatalf("get_state sessionFile = %q, want a .jsonl under %s", readyFile, sessDir)
+		}
+		// RunSession killed the process on timeout; nothing was ever written.
+		if names, err := os.ReadDir(sessDir); err != nil || len(names) != 0 {
+			t.Fatalf("session dir = %v (%v), want it empty", names, err)
+		}
+	})
+
+	// --fork creates the new file before the ready frame, as omp's forkFrom does, its header
+	// naming the source session; the source's entries are not copied.
+	t.Run("fork", func(t *testing.T) {
+		src, err := drive(t, t.TempDir(), []string{"FAKE_OMP_PLAN=goal"}, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sessDir := t.TempDir()
+		s := spec(sessDir, []string{"FAKE_OMP_PLAN=stall"}, 2*time.Second)
+		s.Options.Args = append(s.Options.Args, "--fork", src.SessionFile)
+		var (
+			readyID   string
+			readyHead header
+		)
+		s.OnReady = func(id, file string) { readyID, readyHead = id, readHeader(t, file) }
+		_, err = run(t, s)
+		var f *SessionFailure
+		if !errors.As(err, &f) || f.Reason != "session timeout after 2s" {
+			t.Fatalf("err = %v, want session timeout after 2s", err)
+		}
+		if readyHead.Type != "session" || readyHead.ID != readyID || readyHead.ParentSession != src.SessionID {
+			t.Fatalf("header at ready = %+v, want id %s and parentSession %s", readyHead, readyID, src.SessionID)
+		}
+		if got := strings.Join(sessionEntries(t, sessDir), " "); got != "session" {
+			t.Fatalf("fork session entries = %q, want the header alone", got)
 		}
 	})
 
@@ -133,7 +245,8 @@ func TestFakeOmpBinary(t *testing.T) {
 		if !errors.As(err, &f) || f.Reason != "session timeout after 2s" {
 			t.Fatalf("err = %v, want session timeout after 2s", err)
 		}
-		// The timed-out session still has its file; the council lists it as failed there.
+		// loop's tool calls wrote assistant messages, so the timed-out session has its file;
+		// the council lists it as failed there.
 		sessionEntries(t, sessDir)
 	})
 

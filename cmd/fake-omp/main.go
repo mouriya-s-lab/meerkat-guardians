@@ -4,9 +4,8 @@
 // timeouts, failures and successful goal tools without a real multi-seat LLM session.
 //
 // Behaviour comes entirely from the environment (the variables are documented on
-// internal/fakeomp); the only argument it consumes is --session-dir, every other argument
-// is ignored. Without --session-dir it answers get_state without a file and writes nothing
-// to disk.
+// internal/fakeomp); the arguments it consumes are --session-dir, which is required, and
+// --fork; every other argument is ignored.
 package main
 
 import (

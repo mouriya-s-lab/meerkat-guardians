@@ -1,13 +1,17 @@
 package bases
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/oh-my-omp/pm-guardians/internal/checkout"
 	"github.com/oh-my-omp/pm-guardians/internal/config"
 	"github.com/oh-my-omp/pm-guardians/internal/sessions"
 )
@@ -149,4 +153,156 @@ func writeFile(t *testing.T, path, content string) {
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+const testBase = "g.o__r.m"
+
+// newTestManager is a Manager over one base whose session directory is under a temp root.
+// The checkout directory does not exist, so the remote head check fails without touching the
+// network, which alone never makes a base stale.
+// The omp agent dir holds the config.yml that the fingerprint hashes, so List can read it.
+func newTestManager(t *testing.T, root string) *Manager {
+	t.Helper()
+	prompt := filepath.Join(root, "prompt.md")
+	if err := os.WriteFile(prompt, []byte("prompt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	agentDir := filepath.Join(root, "omp")
+	writeFile(t, filepath.Join(agentDir, "config.yml"), "defaultThinkingLevel: high\n")
+	cfg := &config.Config{
+		Runtime:   config.Runtime{SessionsDir: filepath.Join(root, "sessions"), MaxConcurrentWarmups: 1, OMP: config.OMP{AgentDir: agentDir}},
+		Guardians: []config.Guardian{{ID: "g", Prompt: prompt}},
+		Bases:     []config.Base{{ID: testBase, Guardian: "g", Repo: "o/r", Branch: "main", Model: "m"}},
+		Goals:     config.Goals{Base: config.Goal{Tools: []string{"pm_base_ready"}}},
+	}
+	return New(cfg, sessions.NewRegistry(config.LaunchLink{}), checkout.New(filepath.Join(root, "checkouts")))
+}
+
+// writeSession writes a base session file started at started; readyAt, when non-zero, is the
+// time of its successful pm_base_ready result.
+func writeSession(t *testing.T, m *Manager, id string, started, readyAt time.Time) string {
+	t.Helper()
+	dir := m.Dir(testBase)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ts := func(at time.Time) string { return at.UTC().Format(time.RFC3339Nano) }
+	body := fmt.Sprintf(`{"type":"session","version":3,"id":%q,"timestamp":%q,"cwd":"/c"}`+"\n", id, ts(started)) +
+		fmt.Sprintf(`{"type":"custom","customType":"pm-meta","data":{"kind":"base","base":%q,"model":"m"},"id":"x","timestamp":%q}`+"\n", testBase, ts(started.Add(time.Second)))
+	if !readyAt.IsZero() {
+		body += fmt.Sprintf(`{"type":"message","id":"y","timestamp":%q,"message":{"role":"toolResult","toolName":"pm_base_ready","isError":false}}`+"\n", ts(readyAt))
+	}
+	path := filepath.Join(dir, id+".jsonl")
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// writeFailure writes the failure record Registry.Run leaves beside a failed session file.
+func writeFailure(t *testing.T, sessionFile, reason string, at time.Time) {
+	t.Helper()
+	b, err := json.Marshal(map[string]any{"reason": reason, "at": at})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sessions.FailurePath(sessionFile), b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func listOne(t *testing.T, m *Manager) View {
+	t.Helper()
+	views, err := m.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(views) != 1 {
+		t.Fatalf("views = %+v", views)
+	}
+	return views[0]
+}
+
+func lastWarmJSON(t *testing.T, v View) string {
+	t.Helper()
+	b, err := json.Marshal(v.LastWarm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+var (
+	readyStarted = time.Date(2026, 11, 7, 15, 10, 0, 0, time.UTC)
+	readyAt      = time.Date(2026, 11, 7, 15, 14, 20, 137e6, time.UTC)
+)
+
+// (a) Only a ready session: the last warm is done at warmedAt.
+func TestLastWarmReadyOnly(t *testing.T) {
+	m := newTestManager(t, t.TempDir())
+	writeSession(t, m, "ready-1", readyStarted, readyAt)
+	v := listOne(t, m)
+	if v.State != "ready" || v.Session == nil || *v.Session != "ready-1" || v.WarmedAt == nil || v.Error != nil {
+		t.Fatalf("view = %+v", v)
+	}
+	if v.LastWarm == nil || v.LastWarm.Outcome != WarmDone || !v.LastWarm.At.Equal(*v.WarmedAt) || v.LastWarm.Error != nil {
+		t.Fatalf("lastWarm = %+v", v.LastWarm)
+	}
+	if got, want := lastWarmJSON(t, v), `{"at":"2026-11-07T15:14:20.137Z","outcome":"done","error":null}`; got != want {
+		t.Fatalf("lastWarm json = %s, want %s", got, want)
+	}
+}
+
+// (b) A rewarm that failed after the ready session: the base still serves the old session and
+// the last warm is the failure, with the record's reason and time.
+func TestLastWarmFailedRewarm(t *testing.T) {
+	root := t.TempDir()
+	m := newTestManager(t, root)
+	writeSession(t, m, "ready-1", readyStarted, readyAt)
+	failed := writeSession(t, m, "rewarm-1", time.Date(2026, 11, 7, 16, 46, 58, 0, time.UTC), time.Time{})
+	writeFailure(t, failed, "session timeout after 300s", time.Date(2026, 11, 7, 16, 51, 58, 0, time.UTC))
+	assertFailedRewarm(t, listOne(t, m))
+}
+
+func assertFailedRewarm(t *testing.T, v View) {
+	t.Helper()
+	if v.State != "ready" || v.Session == nil || *v.Session != "ready-1" ||
+		v.WarmedAt == nil || !v.WarmedAt.Equal(readyAt) || v.Error != nil {
+		t.Fatalf("view = %+v", v)
+	}
+	failedAt := time.Date(2026, 11, 7, 16, 51, 58, 0, time.UTC)
+	if v.LastWarm == nil || v.LastWarm.Outcome != WarmFailed || !v.LastWarm.At.Equal(failedAt) ||
+		v.LastWarm.Error == nil || *v.LastWarm.Error != "session timeout after 300s" {
+		t.Fatalf("lastWarm = %+v", v.LastWarm)
+	}
+	if got, want := lastWarmJSON(t, v), `{"at":"2026-11-07T16:51:58Z","outcome":"failed","error":"session timeout after 300s"}`; got != want {
+		t.Fatalf("lastWarm json = %s, want %s", got, want)
+	}
+}
+
+// (c) A failure recorded before the ready session: the last warm is the ready one.
+func TestLastWarmFailureBeforeReady(t *testing.T) {
+	m := newTestManager(t, t.TempDir())
+	failed := writeSession(t, m, "warm-0", time.Date(2026, 11, 7, 14, 0, 0, 0, time.UTC), time.Time{})
+	writeFailure(t, failed, "omp exited", time.Date(2026, 11, 7, 14, 5, 0, 0, time.UTC))
+	writeSession(t, m, "ready-1", readyStarted, readyAt)
+	v := listOne(t, m)
+	if v.State != "ready" || v.Session == nil || *v.Session != "ready-1" || v.WarmedAt == nil || v.Error != nil {
+		t.Fatalf("view = %+v", v)
+	}
+	if v.LastWarm == nil || v.LastWarm.Outcome != WarmDone || !v.LastWarm.At.Equal(*v.WarmedAt) || v.LastWarm.Error != nil {
+		t.Fatalf("lastWarm = %+v", v.LastWarm)
+	}
+}
+
+// (d) A new Manager over the same directory (a restarted program) reports the failed rewarm
+// from the record on disk.
+func TestLastWarmFailedRewarmAfterRestart(t *testing.T) {
+	root := t.TempDir()
+	m := newTestManager(t, root)
+	writeSession(t, m, "ready-1", readyStarted, readyAt)
+	failed := writeSession(t, m, "rewarm-1", time.Date(2026, 11, 7, 16, 46, 58, 0, time.UTC), time.Time{})
+	writeFailure(t, failed, "session timeout after 300s", time.Date(2026, 11, 7, 16, 51, 58, 0, time.UTC))
+	assertFailedRewarm(t, listOne(t, m))
+	assertFailedRewarm(t, listOne(t, newTestManager(t, root)))
 }

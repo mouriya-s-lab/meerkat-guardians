@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oh-my-omp/pm-guardians/internal/config"
 	"github.com/oh-my-omp/pm-guardians/internal/sessions/synth"
 )
 
@@ -80,7 +81,7 @@ func BenchmarkList(b *testing.B) {
 	for _, c := range benchCases {
 		b.Run(c.String(), func(b *testing.B) {
 			dir, _ := benchDir(b, c)
-			r := NewRegistry()
+			r := NewRegistry(config.LaunchLink{})
 			b.ReportAllocs()
 			for b.Loop() {
 				if list, err := r.List(dir, benchGoals, 5); err != nil || len(list) != 5 {

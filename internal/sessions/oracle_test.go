@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oh-my-omp/pm-guardians/internal/config"
 	"github.com/oh-my-omp/pm-guardians/internal/sessions/synth"
 )
 
@@ -331,7 +332,7 @@ func TestOracleList(t *testing.T) {
 	goals := map[Kind][]string{KindBase: {"pm_base_ready"}, KindProxy: {"pm_return_facts"}, KindQuery: {"pm_reply", "pm_replace", "pm_escalate"}}
 	for name, dir := range oracleDirs(t) {
 		all := oracleNewest(t, dir)
-		r := NewRegistry()
+		r := NewRegistry(config.LaunchLink{})
 		for limit := 1; limit <= len(all)+1; limit++ {
 			got, err := r.List(dir, goals, limit)
 			if err != nil {

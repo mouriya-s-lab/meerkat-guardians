@@ -3,6 +3,8 @@ package sessions
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"log/slog"
 	"os"
 	"sort"
@@ -58,6 +60,7 @@ func NewRegistry() *Registry {
 // Run starts omp per s through omprpc.RunSession and records, while it runs, that the session is
 // live and, if it fails, why (at FailurePath of its session file).
 func (r *Registry) Run(ctx context.Context, s Spec) (Result, error) {
+	started := time.Now().UTC()
 	if err := os.MkdirAll(s.SessionDir, 0o755); err != nil {
 		return Result{}, &Failure{Reason: err.Error()}
 	}
@@ -109,9 +112,20 @@ func (r *Registry) Run(ctx context.Context, s Spec) (Result, error) {
 	})
 	// The failure record is written before the session stops being live, so a listing never sees
 	// a finished failed session without its reason and end time. omp writes nothing once killed,
-	// so this moment, not the session file's last entry, is when the session ended.
+	// so this moment, not the session file's last entry, is when the session ended. The record
+	// carries what Run knew from its Spec, so the session lists even when omp never wrote its
+	// file (§I).
 	if err != nil && sessionFile != "" {
-		if werr := writeFailure(sessionFile, err.Error(), time.Now().UTC()); werr != nil {
+		rec := failureRecord{
+			Reason: err.Error(), At: time.Now().UTC(),
+			ID: sessionID, Kind: s.Meta.Kind, Base: s.Meta.Base, Ref: s.Meta.Ref,
+			Seat: s.Meta.Seat, Ask: s.Meta.Ask, Tier: s.Meta.Tier,
+			Model: s.Meta.Model, StartedAt: started,
+		}
+		if rec.Model == "" {
+			rec.Model = s.Model
+		}
+		if werr := writeFailure(sessionFile, rec); werr != nil {
 			slog.Error("record session failure", "session", sessionID, "err", werr)
 		}
 	}
@@ -141,7 +155,7 @@ type Summary struct {
 }
 
 // List derives session rows from every session file under dir, newest first, at most limit rows.
-// goalTools maps each kind to the tools any one of whose success makes a session of that kind done.
+// A session whose file omp never wrote lists from its failure record alone (§I).
 func (r *Registry) List(dir string, goalTools map[Kind][]string, limit int) ([]Summary, error) {
 	files, err := ScanDir(dir)
 	if err != nil {
@@ -208,16 +222,24 @@ func (r *Registry) Live(id string) bool {
 	return r.live[id]
 }
 
-// FindFile returns the session file under dir whose header id is id.
+// FindFile returns the session file under dir whose header id is id. A failure record
+// without its session file names no openable log, so orphan entries never match.
 func FindFile(dir, id string) (string, bool, error) {
 	files, err := ScanDir(dir)
 	if err != nil {
 		return "", false, err
 	}
 	for _, f := range files {
-		if f.ID == id {
-			return f.Path, true, nil
+		if f.ID != id {
+			continue
 		}
+		if _, err := os.Stat(f.Path); err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			return "", false, err
+		}
+		return f.Path, true, nil
 	}
 	return "", false, nil
 }

@@ -52,8 +52,9 @@ type entryMessage struct {
 }
 
 // openSessionFile creates the session file under dir in omp's naming and writes the
-// session header.
-func openSessionFile(dir string) (*sessionFile, error) {
+// session header, then meta (when non-empty) as the pm-meta custom entry the council
+// plugin appends at session start.
+func openSessionFile(dir string, meta json.RawMessage) (*sessionFile, error) {
 	id, err := sessionID()
 	if err != nil {
 		return nil, err
@@ -69,6 +70,13 @@ func openSessionFile(dir string) (*sessionFile, error) {
 		Runtime: runtimeInfo{Version: "fake-omp"}, Cwd: cwd()}); err != nil {
 		fh.Close()
 		return nil, err
+	}
+	if len(meta) > 0 {
+		if err := s.write(sessionEntry{Type: "custom", CustomType: "pm-meta", ID: shortID(), Timestamp: nowStamp(),
+			Runtime: runtimeInfo{Version: "fake-omp"}, Data: meta}); err != nil {
+			fh.Close()
+			return nil, err
+		}
 	}
 	return s, nil
 }

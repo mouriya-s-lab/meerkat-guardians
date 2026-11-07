@@ -11,6 +11,10 @@
 // turn with a retryable resp. non-retryable prompt_result error; loop keeps calling the
 // non-goal tool read and never completes the turn; die writes stderr and exits 3.
 //
+// PM_META, when set, is written as the session's pm-meta custom entry right after the
+// header, as the council plugin does at session start (pm-guardians#22); a PM_META that is
+// not JSON fails the run before the ready frame.
+//
 // The omprpc test binary (TestMain) and cmd/fake-omp both call Main; there is no second
 // copy. fakeomp imports nothing from omprpc: it is the server side of the protocol.
 package fakeomp
@@ -55,9 +59,13 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 // order with the last step repeating. The session file, if any, is created before the
 // ready frame so a timed-out session still has one (row 2).
 func run(args []string, stdin io.Reader, stdout, stderr io.Writer, plan []step) error {
+	meta, err := pmMeta()
+	if err != nil {
+		return err
+	}
 	var sess *sessionFile
 	if dir, ok := parseSessionDir(args); ok {
-		log, err := openSessionFile(dir)
+		log, err := openSessionFile(dir, meta)
 		if err != nil {
 			return err
 		}
@@ -96,6 +104,19 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer, plan []step) 
 		}
 	}
 	return sc.Err()
+}
+
+// pmMeta is PM_META as raw JSON; empty when unset. The council plugin parses the same
+// variable at load and fails on invalid JSON, so the fake does too.
+func pmMeta() (json.RawMessage, error) {
+	v := os.Getenv("PM_META")
+	if v == "" {
+		return nil, nil
+	}
+	if !json.Valid([]byte(v)) {
+		return nil, fmt.Errorf("fake-omp: PM_META is not JSON: %s", v)
+	}
+	return json.RawMessage(v), nil
 }
 
 // engine drives one run: the parsed plan, the goal tool and the per-step delay.

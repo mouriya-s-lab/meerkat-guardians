@@ -94,6 +94,38 @@ func TestFakeOmpBinary(t *testing.T) {
 		}
 	})
 
+	// The council plugin appends PM_META as the pm-meta entry at session start; the council's
+	// session list reads the session kind from it, so the fake writes it right after the header.
+	t.Run("meta", func(t *testing.T) {
+		sessDir := t.TempDir()
+		meta := `{"kind":"draft","seat":"Coordination","ref":"o/pm#2","round":1,"version":1}`
+		if _, err := drive(t, sessDir, []string{"FAKE_OMP_PLAN=goal", "PM_META=" + meta}, 0); err != nil {
+			t.Fatal(err)
+		}
+		want := "session custom:pm-meta message:assistant custom:tool_execution_start custom:tool_execution_end message:toolResult"
+		if got := strings.Join(sessionEntries(t, sessDir), " "); got != want {
+			t.Fatalf("session entries = %q, want %q", got, want)
+		}
+		names, _ := filepath.Glob(filepath.Join(sessDir, "*.jsonl"))
+		b, err := os.ReadFile(names[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		var e struct {
+			Data json.RawMessage `json:"data"`
+		}
+		if err := json.Unmarshal([]byte(strings.Split(string(b), "\n")[1]), &e); err != nil || string(e.Data) != meta {
+			t.Fatalf("pm-meta data = %s (%v), want %s", e.Data, err, meta)
+		}
+	})
+
+	t.Run("badmeta", func(t *testing.T) {
+		_, err := drive(t, t.TempDir(), []string{"FAKE_OMP_PLAN=goal", "PM_META={not json"}, 0)
+		if err == nil || !strings.Contains(err.Error(), "PM_META is not JSON") {
+			t.Fatalf("err = %v, want the startup failure naming PM_META", err)
+		}
+	})
+
 	t.Run("loop", func(t *testing.T) {
 		sessDir := t.TempDir()
 		_, err := drive(t, sessDir, []string{"FAKE_OMP_PLAN=loop"}, 2*time.Second)

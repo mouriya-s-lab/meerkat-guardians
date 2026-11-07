@@ -104,8 +104,8 @@ type session struct {
 	parent  *session // a fork copies the parent's history, entries timestamped before its header
 }
 
-// FileName is the name omp gives a session file: <header timestamp>_<session id>.jsonl.
-func FileName(id string, started time.Time) string {
+// fileName is the name omp gives a session file: <header timestamp>_<session id>.jsonl.
+func fileName(id string, started time.Time) string {
 	return strings.NewReplacer(":", "-", ".", "-").Replace(started.UTC().Format("2006-01-02T15:04:05.000Z")) + "_" + id + ".jsonl"
 }
 
@@ -154,7 +154,7 @@ func write(dir string, s session, l Layout) error {
 		line(map[string]any{"type": "message", "id": "e", "timestamp": ts(at), "message": map[string]any{
 			"role": "assistant", "content": []any{}, "stopReason": "error", "errorMessage": "synthetic provider error"}})
 	}
-	return os.WriteFile(filepath.Join(dir, FileName(s.id, s.started)), []byte(b.String()), 0o644)
+	return os.WriteFile(filepath.Join(dir, fileName(s.id, s.started)), []byte(b.String()), 0o644)
 }
 
 // turn writes one assistant tool call: the assistant message, the tool_execution_start custom

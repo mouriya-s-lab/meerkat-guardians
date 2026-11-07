@@ -28,6 +28,10 @@ func main() {
 		fmt.Fprintln(os.Stderr, "mk-session-fixture: -root and -base are required")
 		os.Exit(2)
 	}
+	if *fingerprint != "" && !json.Valid([]byte(*fingerprint)) {
+		fmt.Fprintln(os.Stderr, "mk-session-fixture: -fingerprint is not JSON")
+		os.Exit(2)
+	}
 	w, err := synth.WriteDir(*root, synth.Layout{
 		Base: *base, Model: *model, N: *n, FileBytes: *fileBytes, LineBytes: *lineBytes, AskFrom: *askFrom,
 		Start: time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC), Fingerprint: json.RawMessage(*fingerprint),

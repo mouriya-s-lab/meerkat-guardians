@@ -13,14 +13,16 @@ import (
 	"github.com/oh-my-omp/pm-guardians/internal/sessions/synth"
 )
 
-// BenchmarkClaim claims an ask no query session file holds, over query directories of two sizes.
+// BenchmarkClaim claims an ask no query session file holds, over query directories of two sizes
+// and with lines longer than a 64 KiB read buffer.
 func BenchmarkClaim(b *testing.B) {
-	for _, n := range []int{10, 40} {
-		b.Run(fmt.Sprintf("N=%d", n), func(b *testing.B) {
+	for _, c := range []struct{ n, lineBytes int }{{10, 16 << 10}, {40, 16 << 10}, {40, 128 << 10}} {
+		n := c.n
+		b.Run(fmt.Sprintf("N=%d/line=%dKiB", n, c.lineBytes>>10), func(b *testing.B) {
 			dir := b.TempDir()
 			base := config.BaseID("g", "o/code", "m")
 			if _, err := synth.WriteDir(dir, synth.Layout{
-				Base: base, Model: "m", N: n, FileBytes: 256 << 10, LineBytes: 16 << 10, AskFrom: 1000,
+				Base: base, Model: "m", N: n, FileBytes: 256 << 10, LineBytes: c.lineBytes, AskFrom: 1000,
 				Start: time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC),
 			}); err != nil {
 				b.Fatal(err)

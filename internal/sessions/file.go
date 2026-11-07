@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -162,31 +163,92 @@ type header struct {
 	startedAt         time.Time
 }
 
-// openLines opens path for reading line by line into buf, which grows past its capacity only
-// for a longer line. A walk reads every file it visits into one buf.
-func openLines(path string, buf []byte) (*os.File, *bufio.Scanner, error) {
-	fh, err := os.Open(path)
-	if err != nil {
-		return nil, nil, err
-	}
-	sc := bufio.NewScanner(fh)
-	sc.Buffer(buf, maxLineBytes)
-	return fh, sc, nil
+// lineReader reads the lines of one file after another as bufio.Scanner with ScanLines does
+// (the newline and a carriage return before it are dropped, a last line without a newline still
+// counts, a line over maxLineBytes is bufio.ErrTooLong). A line that does not fit the reader's
+// buffer is assembled in long, which the lineReader keeps for the next file, so a walk that
+// reuses one lineReader grows it once for its longest line.
+type lineReader struct {
+	r    *bufio.Reader
+	long []byte
+	line []byte
+	err  error
 }
 
-// Initial line buffer sizes: a header and the title lines before it are short; entries are
-// read with the scanner's usual 64 KiB.
+// Reader buffer sizes: a header and the title lines before it are short; entries are read in
+// 64 KiB chunks, the size bufio.Scanner starts with.
 const (
 	headerBuf = 4 << 10
 	entryBuf  = 64 << 10
 )
 
-// scanHeader consumes the lines of sc up to the session header. Lines before it may only be
+func newLineReader(size int) *lineReader {
+	return &lineReader{r: bufio.NewReaderSize(nil, size)}
+}
+
+// open starts reading the file at path; the caller closes the returned file.
+func (l *lineReader) open(path string) (*os.File, error) {
+	fh, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	l.r.Reset(fh)
+	l.line, l.err = nil, nil
+	return fh, nil
+}
+
+// scan advances to the next line, which bytes returns until the following scan.
+func (l *lineReader) scan() bool {
+	if l.err != nil {
+		return false
+	}
+	line, err := l.r.ReadSlice('\n')
+	if err == bufio.ErrBufferFull {
+		l.long = append(l.long[:0], line...)
+		for err == bufio.ErrBufferFull {
+			if len(l.long) > maxLineBytes {
+				l.err = bufio.ErrTooLong
+				return false
+			}
+			line, err = l.r.ReadSlice('\n')
+			l.long = append(l.long, line...)
+		}
+		line = l.long
+	}
+	switch {
+	case err == io.EOF && len(line) == 0:
+		l.err = err
+		return false
+	case err != nil && err != io.EOF:
+		l.err = err
+		return false
+	}
+	l.err = err // io.EOF after a last line without a newline: this line, then stop
+	if len(line) > maxLineBytes {
+		l.err = bufio.ErrTooLong
+		return false
+	}
+	line = bytes.TrimSuffix(line, []byte{'\n'})
+	l.line = bytes.TrimSuffix(line, []byte{'\r'})
+	return true
+}
+
+func (l *lineReader) bytes() []byte { return l.line }
+
+// failed is the read error that ended the lines, nil at the end of the file.
+func (l *lineReader) failed() error {
+	if l.err == io.EOF {
+		return nil
+	}
+	return l.err
+}
+
+// scanHeader consumes the lines of l up to the session header. Lines before it may only be
 // title lines.
-func scanHeader(sc *bufio.Scanner) (header, error) {
-	for sc.Scan() {
+func scanHeader(l *lineReader) (header, error) {
+	for l.scan() {
 		var e entry
-		if json.Unmarshal(sc.Bytes(), &e) != nil {
+		if json.Unmarshal(l.bytes(), &e) != nil {
 			continue
 		}
 		switch e.Type {
@@ -199,48 +261,48 @@ func scanHeader(sc *bufio.Scanner) (header, error) {
 			return header{}, ErrNotSession
 		}
 	}
-	if err := sc.Err(); err != nil {
+	if err := l.failed(); err != nil {
 		return header{}, err
 	}
 	return header{}, ErrNotSession
 }
 
 // readHeader reads the header of the session file at path and nothing after it.
-func readHeader(path string, buf []byte) (header, error) {
-	fh, sc, err := openLines(path, buf)
+func readHeader(path string, l *lineReader) (header, error) {
+	fh, err := l.open(path)
 	if err != nil {
 		return header{}, err
 	}
 	defer fh.Close()
-	return scanHeader(sc)
+	return scanHeader(l)
 }
 
 // readMeta reads the latest pm-meta entry of the session file at path (nil if it has none),
 // decoding only the header and the lines that carry a pm-meta token.
-func readMeta(path string, buf []byte) (*Meta, error) {
-	fh, sc, err := openLines(path, buf)
+func readMeta(path string, l *lineReader) (*Meta, error) {
+	fh, err := l.open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer fh.Close()
-	if _, err := scanHeader(sc); err != nil {
+	if _, err := scanHeader(l); err != nil {
 		return nil, err
 	}
 	var meta *Meta
-	for sc.Scan() {
-		line := sc.Bytes()
+	for l.scan() {
+		line := l.bytes()
 		if !bytes.Contains(line, metaToken) {
 			continue
 		}
-		var l metaLine
-		if json.Unmarshal(line, &l) != nil || !l.isMeta() {
+		var ml metaLine
+		if json.Unmarshal(line, &ml) != nil || !ml.isMeta() {
 			continue
 		}
-		if m, ok := l.meta(); ok {
+		if m, ok := ml.meta(); ok {
 			meta = m
 		}
 	}
-	return meta, sc.Err()
+	return meta, l.failed()
 }
 
 // metaToken is in every line that carries a pm-meta entry: omp writes the customType value as
@@ -249,12 +311,13 @@ var metaToken = []byte(`"pm-meta"`)
 
 // ParseFile reads an omp session file. Lines before the header may only be title lines.
 func ParseFile(path string) (*File, error) {
-	fh, sc, err := openLines(path, make([]byte, entryBuf))
+	l := newLineReader(entryBuf)
+	fh, err := l.open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer fh.Close()
-	h, err := scanHeader(sc)
+	h, err := scanHeader(l)
 	if err != nil {
 		return nil, err
 	}
@@ -262,9 +325,9 @@ func ParseFile(path string) (*File, error) {
 		Path: path, ID: h.id, ParentSession: h.parentSession, StartedAt: h.startedAt, LastAt: h.startedAt,
 		ToolOK: map[string]time.Time{},
 	}
-	for sc.Scan() {
+	for l.scan() {
 		var e entry
-		if json.Unmarshal(sc.Bytes(), &e) != nil {
+		if json.Unmarshal(l.bytes(), &e) != nil {
 			continue
 		}
 		ts := parseTime(e.Timestamp)
@@ -272,9 +335,9 @@ func ParseFile(path string) (*File, error) {
 			f.LastAt = ts
 		}
 		if e.isMeta() {
-			var l metaLine
-			if json.Unmarshal(sc.Bytes(), &l) == nil {
-				if m, ok := l.meta(); ok {
+			var ml metaLine
+			if json.Unmarshal(l.bytes(), &ml) == nil {
+				if m, ok := ml.meta(); ok {
 					f.Meta = m
 				}
 			}
@@ -294,7 +357,7 @@ func ParseFile(path string) (*File, error) {
 			}
 		}
 	}
-	if err := sc.Err(); err != nil {
+	if err := l.failed(); err != nil {
 		return nil, err
 	}
 	switch b, err := os.ReadFile(FailurePath(path)); {
@@ -333,7 +396,7 @@ func walk(dir string, session func(path string) error, record func(path string) 
 		case d.IsDir():
 		case strings.HasSuffix(path, ".jsonl"):
 			return session(path)
-		case strings.HasSuffix(path, ".pm-failure.json"):
+		case record != nil && strings.HasSuffix(path, ".pm-failure.json"):
 			records = append(records, path)
 		}
 		return nil
@@ -352,8 +415,8 @@ func walk(dir string, session func(path string) error, record func(path string) 
 // Candidate is one session under a directory, known before its entries are read: a session
 // file by its header, or a failure record whose session file omp never wrote.
 type Candidate struct {
-	Path      string
-	StartedAt time.Time
+	path      string
+	startedAt time.Time
 	orphan    *File
 }
 
@@ -363,7 +426,7 @@ func (c Candidate) Parse() (f *File, ok bool, err error) {
 	if c.orphan != nil {
 		return c.orphan, true, nil
 	}
-	f, err = ParseFile(c.Path)
+	f, err = ParseFile(c.path)
 	if skipped(err) {
 		return nil, false, nil
 	}
@@ -376,28 +439,28 @@ func (c Candidate) Parse() (f *File, ok bool, err error) {
 // write still lists. A missing dir yields none.
 func Newest(dir string) ([]Candidate, error) {
 	var out []Candidate
-	buf := make([]byte, headerBuf)
+	lr := newLineReader(headerBuf)
 	err := walk(dir, func(path string) error {
-		h, err := readHeader(path, buf)
+		h, err := readHeader(path, lr)
 		if skipped(err) {
 			return nil
 		}
 		if err != nil {
 			return err
 		}
-		out = append(out, Candidate{Path: path, StartedAt: h.startedAt})
+		out = append(out, Candidate{path: path, startedAt: h.startedAt})
 		return nil
 	}, func(recPath string) error {
 		f, ok, err := orphanFile(recPath)
 		if ok {
-			out = append(out, Candidate{Path: f.Path, StartedAt: f.StartedAt, orphan: f})
+			out = append(out, Candidate{path: f.Path, startedAt: f.StartedAt, orphan: f})
 		}
 		return err
 	})
 	if err != nil {
 		return nil, err
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].StartedAt.After(out[j].StartedAt) })
+	sort.Slice(out, func(i, j int) bool { return out[i].startedAt.After(out[j].startedAt) })
 	return out, nil
 }
 
@@ -406,9 +469,9 @@ func Newest(dir string) ([]Candidate, error) {
 // session file omp never wrote is judged by the identity it records.
 func Matching(dir string, keep func(*Meta) bool) ([]*File, error) {
 	var out []*File
-	buf := make([]byte, entryBuf)
+	lr := newLineReader(entryBuf)
 	err := walk(dir, func(path string) error {
-		m, err := readMeta(path, buf)
+		m, err := readMeta(path, lr)
 		if skipped(err) || err == nil && (m == nil || !keep(m)) {
 			return nil
 		}

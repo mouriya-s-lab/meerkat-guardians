@@ -173,6 +173,11 @@ func (r *Registry) List(dir string, goalTools map[Kind][]string, limit int) ([]S
 			files = append(files, f)
 		}
 	}
+	return r.summaries(files, goalTools), nil
+}
+
+// summaries derives one row per file, in order.
+func (r *Registry) summaries(files []*File, goalTools map[Kind][]string) []Summary {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	out := make([]Summary, 0, len(files))
@@ -220,7 +225,7 @@ func (r *Registry) List(dir string, goalTools map[Kind][]string, limit int) ([]S
 		}
 		out = append(out, s)
 	}
-	return out, nil
+	return out
 }
 
 // Live reports whether the session id is held by a running process.
@@ -234,9 +239,9 @@ func (r *Registry) Live(id string) bool {
 // failure record without its session file names no openable log, so orphan entries never match.
 func FindFile(dir, id string) (string, bool, error) {
 	var found string
-	buf := make([]byte, headerBuf)
+	lr := newLineReader(headerBuf)
 	err := walk(dir, func(path string) error {
-		h, err := readHeader(path, buf)
+		h, err := readHeader(path, lr)
 		if skipped(err) {
 			return nil
 		}

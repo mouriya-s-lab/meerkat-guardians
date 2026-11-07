@@ -11,17 +11,17 @@ import (
 
 const benchBase = "g.o__code.m"
 
-func benchLayout(n int) synth.Layout {
+func benchLayout(n, lineBytes int) synth.Layout {
 	return synth.Layout{
-		Base: benchBase, Model: "m", N: n, FileBytes: 256 << 10, LineBytes: 16 << 10, AskFrom: 1000,
+		Base: benchBase, Model: "m", N: n, FileBytes: 256 << 10, LineBytes: lineBytes, AskFrom: 1000,
 		Start: time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC),
 	}
 }
 
-func benchDir(b *testing.B, n int) (string, synth.Written) {
+func benchDir(b *testing.B, c benchCase) (string, synth.Written) {
 	b.Helper()
 	dir := b.TempDir()
-	w, err := synth.WriteDir(dir, benchLayout(n))
+	w, err := synth.WriteDir(dir, benchLayout(c.n, c.lineBytes))
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -35,8 +35,8 @@ var benchGoals = map[Kind][]string{
 // BenchmarkParseFile parses one ~1 MiB session file whose turns carry 64 KiB payloads.
 func BenchmarkParseFile(b *testing.B) {
 	dir := b.TempDir()
-	l := benchLayout(0)
-	l.FileBytes, l.LineBytes = 1<<20, 64<<10
+	l := benchLayout(0, 64<<10)
+	l.FileBytes = 1 << 20
 	if _, err := synth.WriteDir(dir, l); err != nil {
 		b.Fatal(err)
 	}
@@ -52,14 +52,20 @@ func BenchmarkParseFile(b *testing.B) {
 	}
 }
 
-// The directory benchmarks run at two sizes so the cost's growth with the file count shows.
-var benchSizes = []int{10, 40}
+// benchCase is one directory load: n files per directory, each turn's payload lineBytes long.
+type benchCase struct{ n, lineBytes int }
+
+func (c benchCase) String() string { return fmt.Sprintf("N=%d/line=%dKiB", c.n, c.lineBytes>>10) }
+
+// The directory benchmarks run at two file counts, so the cost's growth with the count shows,
+// and with lines longer than a 64 KiB read buffer.
+var benchCases = []benchCase{{10, 16 << 10}, {40, 16 << 10}, {40, 128 << 10}}
 
 func BenchmarkFindFile(b *testing.B) {
-	for _, n := range benchSizes {
-		b.Run(fmt.Sprintf("N=%d", n), func(b *testing.B) {
-			dir, w := benchDir(b, n)
-			id := w.Proxies[n/2]
+	for _, c := range benchCases {
+		b.Run(c.String(), func(b *testing.B) {
+			dir, w := benchDir(b, c)
+			id := w.Proxies[c.n/2]
 			b.ReportAllocs()
 			for b.Loop() {
 				if _, ok, err := FindFile(dir, id); err != nil || !ok {
@@ -71,9 +77,9 @@ func BenchmarkFindFile(b *testing.B) {
 }
 
 func BenchmarkList(b *testing.B) {
-	for _, n := range benchSizes {
-		b.Run(fmt.Sprintf("N=%d", n), func(b *testing.B) {
-			dir, _ := benchDir(b, n)
+	for _, c := range benchCases {
+		b.Run(c.String(), func(b *testing.B) {
+			dir, _ := benchDir(b, c)
 			r := NewRegistry()
 			b.ReportAllocs()
 			for b.Loop() {

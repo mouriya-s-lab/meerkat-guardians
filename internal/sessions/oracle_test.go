@@ -242,6 +242,11 @@ func edgeDir(t *testing.T) string {
 	put("d/null-meta-last.jsonl", hdr("nullmeta", "2026-11-07T03:30:00.000Z"),
 		meta("query", 4, "2026-11-07T03:30:01.000Z"),
 		`{"type":"custom","customType":"pm-meta","data":null,"id":"x","timestamp":"2026-11-07T03:30:02.000Z"}`)
+	// Line endings: CRLF, blank lines, and a last line without a newline.
+	if err := os.WriteFile(filepath.Join(dir, "d/crlf.jsonl"), []byte(hdr("crlf", "2026-11-07T03:40:00.000Z")+"\r\n\r\n"+
+		meta("query", 7, "2026-11-07T03:40:01.000Z")+"\r\n\n"+ok("pm_reply", "2026-11-07T03:40:02.000Z")), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	put("d/fork.jsonl", hdr("fork", "2026-11-07T04:00:00.000Z"),
 		meta("base", 0, "2026-11-07T00:00:00.000Z"), ok("pm_base_ready", "2026-11-07T00:00:01.000Z"),
 		meta("query", 5, "2026-11-07T04:00:01.000Z"), ok("read", "2026-11-07T04:00:02.000Z"))
@@ -266,7 +271,8 @@ func synthDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	if _, err := synth.WriteDir(dir, synth.Layout{
-		Base: "g.o__code.m", Model: "m", N: 4, FileBytes: 64 << 10, LineBytes: 8 << 10, AskFrom: 1000,
+		// Lines both shorter and longer than the 64 KiB reader buffer.
+		Base: "g.o__code.m", Model: "m", N: 4, FileBytes: 512 << 10, LineBytes: 96 << 10, AskFrom: 1000,
 		Start: time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC),
 	}); err != nil {
 		t.Fatal(err)
@@ -325,19 +331,14 @@ func TestOracleList(t *testing.T) {
 	goals := map[Kind][]string{KindBase: {"pm_base_ready"}, KindProxy: {"pm_return_facts"}, KindQuery: {"pm_reply", "pm_replace", "pm_escalate"}}
 	for name, dir := range oracleDirs(t) {
 		all := oracleNewest(t, dir)
+		r := NewRegistry()
 		for limit := 1; limit <= len(all)+1; limit++ {
-			got, err := NewRegistry().List(dir, goals, limit)
+			got, err := r.List(dir, goals, limit)
 			if err != nil {
 				t.Fatal(err)
 			}
-			want := all[:min(limit, len(all))]
-			if len(got) != len(want) {
-				t.Fatalf("%s limit %d: %d rows, want %d", name, limit, len(got), len(want))
-			}
-			for i := range got {
-				if got[i].ID != want[i].ID || !got[i].StartedAt.Equal(want[i].StartedAt) {
-					t.Errorf("%s limit %d row %d: %s %v, want %s %v", name, limit, i, got[i].ID, got[i].StartedAt, want[i].ID, want[i].StartedAt)
-				}
+			if want := r.summaries(all[:min(limit, len(all))], goals); !reflect.DeepEqual(got, want) {
+				t.Errorf("%s limit %d:\n got %+v\nwant %+v", name, limit, got, want)
 			}
 		}
 	}
@@ -415,4 +416,40 @@ func ids(files []*File) []string {
 		out[i] = f.ID
 	}
 	return out
+}
+
+// lineReader yields the lines bufio.Scanner yields, across files read one after another with
+// one lineReader, short and long lines alike.
+func TestLineReaderMatchesScanner(t *testing.T) {
+	long := strings.Repeat("x", 3*entryBuf+17)
+	inputs := []string{
+		"", "\n", "a", "a\n", "a\r\n", "a\r", "\r\n\r\n", "a\n\nb", "a\nb\n",
+		long, long + "\n" + "b", "b\n" + long + "\r\n" + long[:entryBuf] + "\n", strings.Repeat(long+"\n", 3),
+	}
+	dir := t.TempDir()
+	l := newLineReader(entryBuf)
+	for i, in := range inputs {
+		path := filepath.Join(dir, fmt.Sprintf("%d.jsonl", i))
+		if err := os.WriteFile(path, []byte(in), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		var want []string
+		sc := bufio.NewScanner(strings.NewReader(in))
+		sc.Buffer(make([]byte, entryBuf), maxLineBytes)
+		for sc.Scan() {
+			want = append(want, sc.Text())
+		}
+		fh, err := l.open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for l.scan() {
+			got = append(got, string(l.bytes()))
+		}
+		fh.Close()
+		if sc.Err() != nil || l.failed() != nil || !reflect.DeepEqual(got, want) {
+			t.Errorf("input %d: got %d lines (%v), want %d (%v)", i, len(got), l.failed(), len(want), sc.Err())
+		}
+	}
 }

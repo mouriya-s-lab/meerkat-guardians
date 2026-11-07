@@ -133,6 +133,7 @@ func (m *Manager) run(b config.Base) error {
 		GoalTools: m.cfg.Goals.Base.Tools, Opening: opening, Continue: cont,
 		Meta:               sessions.Meta{Kind: sessions.KindBase, Base: b.ID, Model: b.Model, Fingerprint: &fp},
 		MaxContinuePrompts: rt.MaxContinuePrompts,
+		MaxDuration:        rt.SessionTimeout(),
 	})
 	return err
 }

@@ -24,6 +24,7 @@ type Spec struct {
 	Meta                       Meta
 	Env                        []string // extra environment of the omp child, KEY=VALUE
 	MaxContinuePrompts         int
+	MaxDuration                time.Duration // bounds the session from start to its goal tool
 }
 
 // Result is a session that reached its goal: Args are the goal tool call's arguments.
@@ -98,6 +99,7 @@ func (r *Registry) Run(ctx context.Context, s Spec) (Result, error) {
 		MaxContinuePrompts: s.MaxContinuePrompts,
 		ReadyTimeout:       s.OMP.ReadyTimeout(),
 		ExitGrace:          s.OMP.ExitGrace(),
+		MaxDuration:        s.MaxDuration,
 		OnReady: func(id, _ string) {
 			sessionID = id
 			r.mu.Lock()

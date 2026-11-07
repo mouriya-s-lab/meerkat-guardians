@@ -145,6 +145,16 @@ func TestLoadErrorsNameKeyPath(t *testing.T) {
 			"shared/repos.yaml: omp: missing",
 		},
 		{
+			"missing session timeout",
+			map[string][2]string{"guardians/runtime.yaml": {"sessionTimeoutSeconds: 1800\n", ""}},
+			"guardians/runtime.yaml: sessionTimeoutSeconds: missing",
+		},
+		{
+			"zero session timeout",
+			map[string][2]string{"guardians/runtime.yaml": {"sessionTimeoutSeconds: 1800", "sessionTimeoutSeconds: 0"}},
+			"guardians/runtime.yaml: sessionTimeoutSeconds: missing (must be a positive integer)",
+		},
+		{
 			"route tier without base",
 			map[string][2]string{"guardians/routing.yaml": {"simple: futureppo-pool/minimax-m3.1-flash", "simple: openai/gpt-x"}},
 			"guardians/routing.yaml: routes[0].tiers.simple: no base",

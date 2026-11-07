@@ -36,12 +36,18 @@ type Config struct {
 }
 
 type Runtime struct {
-	Listen               string `yaml:"listen"`
-	SessionsDir          string `yaml:"sessionsDir"`
-	CheckoutsDir         string `yaml:"checkoutsDir"`
-	OMP                  OMP    `yaml:"omp"`
-	MaxContinuePrompts   int    `yaml:"maxContinuePrompts"`
-	MaxConcurrentWarmups int    `yaml:"maxConcurrentWarmups"`
+	Listen                string `yaml:"listen"`
+	SessionsDir           string `yaml:"sessionsDir"`
+	CheckoutsDir          string `yaml:"checkoutsDir"`
+	OMP                   OMP    `yaml:"omp"`
+	MaxContinuePrompts    int    `yaml:"maxContinuePrompts"`
+	SessionTimeoutSeconds int    `yaml:"sessionTimeoutSeconds"`
+	MaxConcurrentWarmups  int    `yaml:"maxConcurrentWarmups"`
+}
+
+// SessionTimeout bounds every omp session (base, proxy, query) from start to its goal tool.
+func (r Runtime) SessionTimeout() time.Duration {
+	return time.Duration(r.SessionTimeoutSeconds) * time.Second
 }
 
 type OMP struct {
@@ -361,6 +367,7 @@ func Load(root string) (*Config, error) {
 		f.positive("omp.readyTimeoutSeconds", r.OMP.ReadyTimeoutSeconds)
 		f.positive("omp.exitGraceSeconds", r.OMP.ExitGraceSeconds)
 		f.positive("maxContinuePrompts", r.MaxContinuePrompts)
+		f.positive("sessionTimeoutSeconds", r.SessionTimeoutSeconds)
 		f.positive("maxConcurrentWarmups", r.MaxConcurrentWarmups)
 		r.SessionsDir = resolve(r.SessionsDir)
 		r.CheckoutsDir = resolve(r.CheckoutsDir)

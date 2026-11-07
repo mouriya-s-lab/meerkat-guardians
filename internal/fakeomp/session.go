@@ -9,15 +9,18 @@ import (
 	"time"
 )
 
-// sessionFile is the omp session file a session-dir run writes. The header follows omp's
-// v3 form; each tool call appends the entries omp records for one (assistant toolCall
-// message, tool_execution_start, tool_execution_end, toolResult message). The file exists
-// from before the ready frame, so a session that never reaches its goal still has it
-// (acceptance row 2), and get_state answers with its path (row 1).
+// sessionFile is the omp session file a session-dir run writes, created when omp creates
+// it: a fresh session's file appears with its first assistant message, a --fork session's
+// before the ready frame. get_state answers with the path either way (pm-guardians#26). The
+// header follows omp's v3 form; each tool call appends the entries omp records for one
+// (assistant toolCall message, tool_execution_start, tool_execution_end, toolResult
+// message).
 type sessionFile struct {
-	path string // the .jsonl path get_state reports
-	id   string // the session id in the header and get_state
-	fh   *os.File
+	path   string          // the .jsonl path get_state reports
+	id     string          // the session id in the header and get_state
+	parent string          // the fork source's session id, the header's parentSession; empty for a fresh session
+	meta   json.RawMessage // PM_META, written as the pm-meta entry right after the header
+	fh     *os.File        // nil until start creates the file
 }
 
 // sessionEntry is what every non-title line of an omp session file carries; header-only
@@ -32,8 +35,9 @@ type sessionEntry struct {
 	Data       json.RawMessage `json:"data,omitempty"`
 	Message    *entryMessage   `json:"message,omitempty"`
 	// session header only
-	Version int    `json:"version,omitempty"`
-	Cwd     string `json:"cwd,omitempty"`
+	Version       int    `json:"version,omitempty"`
+	Cwd           string `json:"cwd,omitempty"`
+	ParentSession string `json:"parentSession,omitempty"`
 }
 
 // runtimeInfo is the runtime object every entry carries.
@@ -51,47 +55,72 @@ type entryMessage struct {
 	Timestamp  int64           `json:"timestamp,omitempty"`
 }
 
-// openSessionFile creates the session file under dir in omp's naming and writes the
-// session header, then meta (when non-empty) as the pm-meta custom entry the council
-// plugin appends at session start.
-func openSessionFile(dir string, meta json.RawMessage) (*sessionFile, error) {
+// newSessionFile names the session file under dir in omp's naming without touching the
+// disk; parent is the fork source's session id, empty for a fresh session.
+func newSessionFile(dir string, meta json.RawMessage, parent string) (*sessionFile, error) {
 	id, err := sessionID()
 	if err != nil {
 		return nil, err
 	}
-	name := nowStamp() + "_" + id + ".jsonl"
-	path := filepath.Join(dir, name)
-	fh, err := os.Create(path)
+	return &sessionFile{path: filepath.Join(dir, nowStamp()+"_"+id+".jsonl"), id: id, parent: parent, meta: meta}, nil
+}
+
+// start creates the file and writes the session header, then meta (when non-empty) as the
+// pm-meta custom entry the council plugin appends at session start.
+func (s *sessionFile) start() error {
+	fh, err := os.Create(s.path)
 	if err != nil {
-		return nil, fmt.Errorf("fake-omp: session file: %w", err)
+		return fmt.Errorf("fake-omp: session file: %w", err)
 	}
-	s := &sessionFile{path: path, id: id, fh: fh}
-	if err := s.write(sessionEntry{Type: "session", Version: 3, ID: id, Timestamp: nowStamp(),
-		Runtime: runtimeInfo{Version: "fake-omp"}, Cwd: cwd()}); err != nil {
-		fh.Close()
-		return nil, err
+	s.fh = fh
+	if err := s.write(sessionEntry{Type: "session", Version: 3, ID: s.id, Timestamp: nowStamp(),
+		Runtime: runtimeInfo{Version: "fake-omp"}, Cwd: cwd(), ParentSession: s.parent}); err != nil {
+		return err
 	}
-	if len(meta) > 0 {
-		if err := s.write(sessionEntry{Type: "custom", CustomType: "pm-meta", ID: shortID(), Timestamp: nowStamp(),
-			Runtime: runtimeInfo{Version: "fake-omp"}, Data: meta}); err != nil {
-			fh.Close()
-			return nil, err
-		}
+	if len(s.meta) > 0 {
+		return s.write(sessionEntry{Type: "custom", CustomType: "pm-meta", ID: shortID(), Timestamp: nowStamp(),
+			Runtime: runtimeInfo{Version: "fake-omp"}, Data: s.meta})
 	}
-	return s, nil
+	return nil
+}
+
+// forkSourceID reads the session id from the header line of the fork source file.
+func forkSourceID(path string) (string, error) {
+	fh, err := os.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("fake-omp: --fork: %w", err)
+	}
+	defer fh.Close()
+	var h struct {
+		Type string `json:"type"`
+		ID   string `json:"id"`
+	}
+	if err := json.NewDecoder(fh).Decode(&h); err != nil || h.Type != "session" || h.ID == "" {
+		return "", fmt.Errorf("fake-omp: --fork %s: first line is not a session header", path)
+	}
+	return h.ID, nil
 }
 
 // appendToolCall records one tool execution: the assistant message whose content carries
 // the toolCall, the tool_execution_start and tool_execution_end custom events, and the
-// toolResult message that closes the call — omp's chain, replayed.
-func (s *sessionFile) appendToolCall(callID, name, argsJSON, resultJSON string) {
+// toolResult message that closes the call — omp's chain, replayed. The first assistant
+// message of a fresh session creates the file.
+func (s *sessionFile) appendToolCall(callID, name, argsJSON, resultJSON string) error {
+	if s.fh == nil {
+		if err := s.start(); err != nil {
+			return err
+		}
+	}
 	parent := ""
+	var err error
 	appendOne := func(e sessionEntry) {
 		e.ID = shortID()
 		e.ParentID = parent
 		e.Timestamp = nowStamp()
 		parent = e.ID
-		s.write(e)
+		if err == nil {
+			err = s.write(e)
+		}
 	}
 	appendOne(sessionEntry{Type: "message", Runtime: runtimeInfo{Version: "fake-omp"},
 		Message: &entryMessage{Role: "assistant", Content: json.RawMessage(fmt.Sprintf(
@@ -107,6 +136,7 @@ func (s *sessionFile) appendToolCall(callID, name, argsJSON, resultJSON string) 
 			Content:   json.RawMessage(resultContent(resultJSON)),
 			IsError:   false,
 			Timestamp: time.Now().UnixMilli()}})
+	return err
 }
 
 // write appends one entry line.
@@ -136,8 +166,12 @@ func resultContent(resultJSON string) string {
 	return resultJSON
 }
 
-// close flushes and closes the file.
-func (s *sessionFile) close() { s.fh.Close() }
+// close closes the file, if start created it.
+func (s *sessionFile) close() {
+	if s.fh != nil {
+		s.fh.Close()
+	}
+}
 
 // state is what get_state answers: the session id and file path.
 func (s *sessionFile) state() map[string]string {

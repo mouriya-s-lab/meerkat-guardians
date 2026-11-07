@@ -43,6 +43,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/asks", s.submitAsk)
 	mux.HandleFunc("GET /v1/sessions", s.listSessions)
 	mux.HandleFunc("GET /v1/sessions/{id}/log", s.sessionLog)
+	mux.HandleFunc("GET /v1/config", s.showConfig)
+	mux.HandleFunc("POST /v1/config/check", s.checkConfig)
 	mux.HandleFunc("OPTIONS /", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
@@ -204,6 +206,55 @@ func (s *Server) sessionLog(w http.ResponseWriter, r *http.Request) {
 	if _, err := io.Copy(w, f); err != nil {
 		slog.Warn("session log copy failed", "session", id, "err", err)
 	}
+}
+
+// configCheckBody is the body of POST /v1/config/check: the candidate files by path under the config root.
+type configCheckBody struct {
+	Files map[string]string `json:"files"`
+}
+
+// configCheckResult is the answer of POST /v1/config/check; errors is present only when ok is false.
+type configCheckResult struct {
+	OK     bool               `json:"ok"`
+	Errors []config.Violation `json:"errors,omitempty"`
+}
+
+// maxConfigCheckBody bounds the candidate set a check request may carry.
+const maxConfigCheckBody = 8 << 20
+
+func (s *Server) showConfig(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, s.cfg.Manifest)
+}
+
+func (s *Server) checkConfig(w http.ResponseWriter, r *http.Request) {
+	var body configCheckBody
+	if err := decodeBody(w, r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "body: "+err.Error())
+		return
+	}
+	if body.Files == nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", `body: "files" is required`)
+		return
+	}
+	errs := config.Check(s.cfg.Root, body.Files)
+	if len(errs) == 0 {
+		writeJSON(w, http.StatusOK, configCheckResult{OK: true})
+		return
+	}
+	writeJSON(w, http.StatusOK, configCheckResult{Errors: errs})
+}
+
+// decodeBody decodes the request body into v as exactly one JSON object with no unknown fields.
+func decodeBody(w http.ResponseWriter, r *http.Request, v any) error {
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxConfigCheckBody))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(v); err != nil {
+		return err
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return errors.New("unexpected data after the JSON object")
+	}
+	return nil
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

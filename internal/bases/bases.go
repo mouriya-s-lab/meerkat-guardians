@@ -138,14 +138,27 @@ func (m *Manager) run(b config.Base) error {
 }
 
 // currentFingerprint is the fingerprint the current configuration would warm base b with,
-// without the commit.
+// without the commit. The omp settings are <omp.agentDir>/config.yml, which every omp child
+// reads through PI_CODING_AGENT_DIR.
 func (m *Manager) currentFingerprint(b config.Base, g config.Guardian) (sessions.Fingerprint, error) {
-	prompt, err := os.ReadFile(g.Prompt)
+	prompt, err := fileSha256(g.Prompt)
 	if err != nil {
 		return sessions.Fingerprint{}, err
 	}
-	sum := sha256.Sum256(prompt)
-	return sessions.Fingerprint{Model: b.Model, PromptSha256: hex.EncodeToString(sum[:]), Tools: g.ToolsArg()}, nil
+	settings, err := fileSha256(filepath.Join(m.cfg.Runtime.OMP.AgentDir, "config.yml"))
+	if err != nil {
+		return sessions.Fingerprint{}, fmt.Errorf("omp settings: %w", err)
+	}
+	return sessions.Fingerprint{Model: b.Model, PromptSha256: prompt, Tools: g.ToolsArg(), OMPSettingsSha256: settings}, nil
+}
+
+func fileSha256(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:]), nil
 }
 
 // scan returns the newest session of base id and the newest one in which a base goal tool
@@ -251,8 +264,10 @@ func recorded(f *sessions.File) *sessions.Fingerprint {
 
 // Compare decides whether a ready base is stale: forks under the current configuration would
 // not share its prompt cache (model, system prompt or tools differ from those recorded at warm
-// time) or the branch it read has moved. current carries no commit; remoteHead is the branch
-// head on the remote, or remoteErr when it could not be read (which alone never makes it stale).
+// time), would run under other omp settings (a record without the settings hash counts as
+// different), or the branch it read has moved. current carries no commit; remoteHead is the
+// branch head on the remote, or remoteErr when it could not be read (which alone never makes it
+// stale).
 func Compare(rec *sessions.Fingerprint, current sessions.Fingerprint, branch, remoteHead string, remoteErr error) (bool, string) {
 	if rec == nil {
 		return true, "no fingerprint recorded"
@@ -266,6 +281,9 @@ func Compare(rec *sessions.Fingerprint, current sessions.Fingerprint, branch, re
 	}
 	if rec.Tools != current.Tools {
 		reasons = append(reasons, fmt.Sprintf("tools changed %s -> %s", rec.Tools, current.Tools))
+	}
+	if rec.OMPSettingsSha256 != current.OMPSettingsSha256 {
+		reasons = append(reasons, "omp settings changed")
 	}
 	stale := len(reasons) > 0
 	switch {

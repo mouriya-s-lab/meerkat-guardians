@@ -108,9 +108,10 @@ func (r *Registry) Run(ctx context.Context, s Spec) (Result, error) {
 		},
 	})
 	// The failure record is written before the session stops being live, so a listing never sees
-	// a finished failed session without its reason.
+	// a finished failed session without its reason and end time. omp writes nothing once killed,
+	// so this moment, not the session file's last entry, is when the session ended.
 	if err != nil && sessionFile != "" {
-		if werr := writeFailure(sessionFile, err.Error()); werr != nil {
+		if werr := writeFailure(sessionFile, err.Error(), time.Now().UTC()); werr != nil {
 			slog.Error("record session failure", "session", sessionID, "err", werr)
 		}
 	}
@@ -187,6 +188,9 @@ func (r *Registry) List(dir string, goalTools map[Kind][]string, limit int) ([]S
 		}
 		if s.State != "running" {
 			ended := f.LastAt
+			if !f.FailedAt.IsZero() {
+				ended = f.FailedAt
+			}
 			s.EndedAt = &ended
 		}
 		if errText != "" {

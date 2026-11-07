@@ -137,7 +137,7 @@ func TestLoadErrorsNameKeyPath(t *testing.T) {
 		{
 			"zero exit grace",
 			map[string][2]string{"guardians/runtime.yaml": {"exitGraceSeconds: 30", "exitGraceSeconds: 0"}},
-			"guardians/runtime.yaml: omp.exitGraceSeconds: missing",
+			"guardians/runtime.yaml: omp.exitGraceSeconds: must be a positive integer, got 0",
 		},
 		{
 			"missing shared key",
@@ -152,7 +152,17 @@ func TestLoadErrorsNameKeyPath(t *testing.T) {
 		{
 			"zero session timeout",
 			map[string][2]string{"guardians/runtime.yaml": {"sessionTimeoutSeconds: 1800", "sessionTimeoutSeconds: 0"}},
-			"guardians/runtime.yaml: sessionTimeoutSeconds: missing (must be a positive integer)",
+			"guardians/runtime.yaml: sessionTimeoutSeconds: must be a positive integer, got 0",
+		},
+		{
+			"negative project number",
+			map[string][2]string{"shared/repos.yaml": {"number: 1", "number: -2"}},
+			"shared/repos.yaml: pm.project.number: must be a positive integer, got -2",
+		},
+		{
+			"missing project number",
+			map[string][2]string{"shared/repos.yaml": {", number: 1", ""}},
+			"shared/repos.yaml: pm.project.number: missing",
 		},
 		{
 			"route tier without base",

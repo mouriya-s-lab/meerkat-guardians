@@ -3,6 +3,7 @@ package sessions
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"os"
 	"sort"
 	"strings"
@@ -43,20 +44,19 @@ type Failure struct {
 
 func (f *Failure) Error() string { return f.Reason }
 
-// Registry runs sessions and remembers, for this process lifetime, which are live and why
-// failed ones failed. Everything else about a session comes from its file.
+// Registry runs sessions and remembers, for this process lifetime, which are live. Everything
+// else about a session comes from its file and the failure record beside it.
 type Registry struct {
-	mu       sync.Mutex
-	live     map[string]bool
-	failures map[string]string
+	mu   sync.Mutex
+	live map[string]bool
 }
 
 func NewRegistry() *Registry {
-	return &Registry{live: map[string]bool{}, failures: map[string]string{}}
+	return &Registry{live: map[string]bool{}}
 }
 
 // Run starts omp per s through omprpc.RunSession and records, while it runs, that the session is
-// live and, if it fails, why.
+// live and, if it fails, why (at FailurePath of its session file).
 func (r *Registry) Run(ctx context.Context, s Spec) (Result, error) {
 	if err := os.MkdirAll(s.SessionDir, 0o755); err != nil {
 		return Result{}, &Failure{Reason: err.Error()}
@@ -79,7 +79,7 @@ func (r *Registry) Run(ctx context.Context, s Spec) (Result, error) {
 	if s.ForkFrom != "" {
 		args = append(args, "--fork", s.ForkFrom)
 	}
-	var sessionID string
+	var sessionID, sessionFile string
 	res, err := omprpc.RunSession(ctx, omprpc.SessionSpec{
 		Options: omprpc.Options{
 			Bin:  s.OMP.Bin,
@@ -100,22 +100,26 @@ func (r *Registry) Run(ctx context.Context, s Spec) (Result, error) {
 		ReadyTimeout:       s.OMP.ReadyTimeout(),
 		ExitGrace:          s.OMP.ExitGrace(),
 		MaxDuration:        s.MaxDuration,
-		OnReady: func(id, _ string) {
-			sessionID = id
+		OnReady: func(id, file string) {
+			sessionID, sessionFile = id, file
 			r.mu.Lock()
 			r.live[id] = true
 			r.mu.Unlock()
 		},
 	})
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	// The failure record is written before the session stops being live, so a listing never sees
+	// a finished failed session without its reason.
+	if err != nil && sessionFile != "" {
+		if werr := writeFailure(sessionFile, err.Error()); werr != nil {
+			slog.Error("record session failure", "session", sessionID, "err", werr)
+		}
+	}
 	if sessionID != "" {
+		r.mu.Lock()
 		delete(r.live, sessionID)
+		r.mu.Unlock()
 	}
 	if err != nil {
-		if sessionID != "" {
-			r.failures[sessionID] = err.Error()
-		}
 		return Result{}, &Failure{SessionID: sessionID, Reason: err.Error()}
 	}
 	return Result{SessionID: res.SessionID, SessionFile: res.SessionFile, Args: res.Args}, nil
@@ -167,8 +171,8 @@ func (r *Registry) List(dir string, goalTools map[Kind][]string, limit int) ([]S
 		}
 		s.Label = string(s.Kind) + " " + label
 		errText := f.LastError
-		if reason, ok := r.failures[f.ID]; ok {
-			errText = reason
+		if f.Failure != "" {
+			errText = f.Failure
 		}
 		switch _, done := f.GoalAt(goalTools[s.Kind]); {
 		case r.live[f.ID]:

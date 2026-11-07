@@ -219,6 +219,9 @@ func (m *Manager) List(ctx context.Context) ([]View, error) {
 			v.State = "failed"
 			reason := failure
 			if reason == "" && len(files) > 0 {
+				reason = files[0].Failure
+			}
+			if reason == "" && len(files) > 0 {
 				reason = files[0].LastError
 			}
 			if reason == "" {

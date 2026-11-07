@@ -328,6 +328,7 @@ func Load(root string) (*Config, error) {
 		rep Repos
 		prj ProjectConfig
 	)
+	v := &validator{files: map[string]*ast.File{}}
 	for _, f := range []struct {
 		rel string
 		dst any
@@ -340,12 +341,13 @@ func Load(root string) (*Config, error) {
 		{"shared/repos.yaml", &rep},
 		{"shared/project.yaml", &prj},
 	} {
-		if err := decodeFile(root, f.rel, f.dst); err != nil {
+		file, err := decodeFile(root, f.rel, f.dst)
+		if err != nil {
 			return nil, err
 		}
+		v.files[f.rel] = file
 	}
 
-	v := &validator{}
 	cfg := &Config{Runtime: rt, Guardians: gf.Guardians, Routes: rf.Routes, Goals: gl, Repos: rep, Project: prj}
 	resolve := func(p string) string {
 		if p == "" || filepath.IsAbs(p) {
@@ -526,7 +528,12 @@ func Load(root string) (*Config, error) {
 	return cfg, nil
 }
 
-type validator struct{ errs []error }
+// validator collects every validation error; files holds each decoded file's syntax tree, so a
+// check can tell an absent key from a present one with a zero value.
+type validator struct {
+	errs  []error
+	files map[string]*ast.File
+}
 
 type fileValidator struct {
 	v    *validator
@@ -534,6 +541,16 @@ type fileValidator struct {
 }
 
 func (v *validator) file(name string) fileValidator { return fileValidator{v, name} }
+
+// has reports whether the YAML key path (without the leading "$.") is present in the file.
+func (f fileValidator) has(path string) bool {
+	p, err := yaml.PathString("$." + path)
+	if err != nil {
+		panic(fmt.Sprintf("config: bad key path %q: %v", path, err))
+	}
+	node, err := p.FilterFile(f.v.files[f.name])
+	return err == nil && node != nil
+}
 
 func (f fileValidator) errorf(path, format string, args ...any) {
 	f.v.errs = append(f.v.errs, fmt.Errorf("%s: %s: %s", f.name, path, fmt.Sprintf(format, args...)))
@@ -562,8 +579,12 @@ func (f fileValidator) nonEmpty(path string, n int) {
 }
 
 func (f fileValidator) positive(path string, n int) {
-	if n <= 0 {
-		f.errorf(path, "missing (must be a positive integer)")
+	switch {
+	case n > 0:
+	case f.has(path):
+		f.errorf(path, "must be a positive integer, got %d", n)
+	default:
+		f.missing(path)
 	}
 }
 
@@ -612,15 +633,20 @@ func (f fileValidator) goal(path string, g *Goal, sample any) {
 	}
 }
 
-// decodeFile strictly decodes root/rel into dst. Decode errors are reported with the YAML key path.
-func decodeFile(root, rel string, dst any) error {
+// decodeFile strictly decodes root/rel into dst and returns the file's syntax tree. Decode errors
+// are reported with the YAML key path.
+func decodeFile(root, rel string, dst any) (*ast.File, error) {
 	b, err := os.ReadFile(filepath.Join(root, rel))
 	if err != nil {
-		return fmt.Errorf("%s: %w", rel, err)
+		return nil, fmt.Errorf("%s: %w", rel, err)
 	}
 	err = yaml.UnmarshalWithOptions(b, dst, yaml.DisallowUnknownField(), yaml.Strict())
 	if err == nil {
-		return nil
+		file, err := parser.ParseBytes(b, 0)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", rel, err)
+		}
+		return file, nil
 	}
 	var ye interface {
 		GetMessage() string
@@ -628,11 +654,11 @@ func decodeFile(root, rel string, dst any) error {
 	}
 	if errors.As(err, &ye) && ye.GetToken() != nil {
 		if path := keyPath(b, ye.GetToken().Position); path != "" {
-			return fmt.Errorf("%s: %s: %s", rel, path, ye.GetMessage())
+			return nil, fmt.Errorf("%s: %s: %s", rel, path, ye.GetMessage())
 		}
-		return fmt.Errorf("%s: line %d: %s", rel, ye.GetToken().Position.Line, ye.GetMessage())
+		return nil, fmt.Errorf("%s: line %d: %s", rel, ye.GetToken().Position.Line, ye.GetMessage())
 	}
-	return fmt.Errorf("%s: %w", rel, err)
+	return nil, fmt.Errorf("%s: %w", rel, err)
 }
 
 // keyPath returns the YAML path (without the leading "$.") of the node at pos.

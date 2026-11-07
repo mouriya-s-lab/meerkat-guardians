@@ -101,15 +101,35 @@ func forkSourceID(path string) (string, error) {
 	return h.ID, nil
 }
 
+// begin creates the file on a fresh session's first assistant message; a --fork session's
+// already exists.
+func (s *sessionFile) begin() error {
+	if s.fh != nil {
+		return nil
+	}
+	return s.start()
+}
+
+// appendText records a turn that ends without a tool call: one assistant message whose
+// content is the text.
+func (s *sessionFile) appendText(text string) error {
+	if err := s.begin(); err != nil {
+		return err
+	}
+	content, err := json.Marshal([]map[string]string{{"type": "text", "text": text}})
+	if err != nil {
+		return err
+	}
+	return s.write(sessionEntry{Type: "message", ID: shortID(), Timestamp: nowStamp(), Runtime: runtimeInfo{Version: "fake-omp"},
+		Message: &entryMessage{Role: "assistant", Content: content}})
+}
+
 // appendToolCall records one tool execution: the assistant message whose content carries
 // the toolCall, the tool_execution_start and tool_execution_end custom events, and the
-// toolResult message that closes the call — omp's chain, replayed. The first assistant
-// message of a fresh session creates the file.
+// toolResult message that closes the call — omp's chain, replayed.
 func (s *sessionFile) appendToolCall(callID, name, argsJSON, resultJSON string) error {
-	if s.fh == nil {
-		if err := s.start(); err != nil {
-			return err
-		}
+	if err := s.begin(); err != nil {
+		return err
 	}
 	parent := ""
 	var err error

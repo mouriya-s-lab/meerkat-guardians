@@ -161,7 +161,7 @@ func TestCallAndEvents(t *testing.T) {
 	if result.Status != "error" || result.Error == nil || !result.Error.Retryable || result.Error.Message != "429 slow down" {
 		t.Fatalf("result = %+v", result)
 	}
-	// The goal turn's assistant message created the file, with get_state's id as its header id.
+	// The text turn's assistant message created the file, with get_state's id as its header id.
 	b, err := os.ReadFile(st.SessionFile)
 	if err != nil {
 		t.Fatalf("session file after the goal turn: %v", err)

@@ -130,6 +130,33 @@ func TestFakeOmpBinary(t *testing.T) {
 		}
 	})
 
+	// A text turn ends with an assistant text message, which creates a fresh session's file
+	// as omp's does. No continue prompt is allowed, so the session fails after that one turn.
+	t.Run("text", func(t *testing.T) {
+		sessDir := t.TempDir()
+		s := spec(sessDir, []string{"FAKE_OMP_PLAN=text"}, 0)
+		s.MaxContinuePrompts = 0
+		var (
+			readyID, readyFile string
+			readyErr           error
+		)
+		s.OnReady = func(id, file string) { readyID, readyFile = id, file; _, readyErr = os.Stat(file) }
+		_, err := run(t, s)
+		var f *SessionFailure
+		if !errors.As(err, &f) || f.Reason != "continue limit reached" {
+			t.Fatalf("err = %v, want continue limit reached", err)
+		}
+		if !errors.Is(readyErr, fs.ErrNotExist) {
+			t.Fatalf("session file at ready: %v, want it absent", readyErr)
+		}
+		if h := readHeader(t, readyFile); h.Type != "session" || h.ID != readyID {
+			t.Fatalf("header = %+v, want a session header with id %s", h, readyID)
+		}
+		if got := strings.Join(sessionEntries(t, sessDir), " "); got != "session message:assistant" {
+			t.Fatalf("session entries = %q, want the header and one assistant message", got)
+		}
+	})
+
 	// stall stops the turn before its first assistant message, so the session never gets a
 	// file: the failed session without one that the session lists must show (pm-guardians#26).
 	t.Run("stall", func(t *testing.T) {

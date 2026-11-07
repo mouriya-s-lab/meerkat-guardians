@@ -7,10 +7,11 @@
 //	FAKE_OMP_DELAY_MS  delay before each step, in milliseconds
 //
 // Steps: goal calls the goal tool (its arguments from FAKE_OMP_ARGS, else the prompt text
-// as {"facts": …}); text completes the turn without a tool call; retry and fatal end the
-// turn with a retryable resp. non-retryable prompt_result error; loop keeps calling the
-// non-goal tool read and never completes the turn; stall acknowledges the prompt, then
-// writes nothing and outputs nothing until killed; die writes stderr and exits 3.
+// as {"facts": …}); text completes the turn with an assistant text message and no tool
+// call; retry and fatal end the turn with a retryable resp. non-retryable prompt_result
+// error; loop keeps calling the non-goal tool read and never completes the turn; stall
+// acknowledges the prompt, then writes nothing and outputs nothing until killed; die writes
+// stderr and exits 3.
 //
 // The session file follows omp's timing (pm-guardians#26): a fresh session's file is created
 // with its first assistant message, so a session that stalls or fails before one has none;
@@ -215,9 +216,13 @@ func (e engine) turn(i int, cmd command, sess *sessionFile, enc *json.Encoder) e
 	case stepText:
 		// Text streams as message_update frames while the client is busy: a burst
 		// exercises the unbounded event queue between the stdout reader and callers
-		// that wait on a Call response.
+		// that wait on a Call response. The frames carry no text; the finished message
+		// records the fixed reply "done".
 		for i := range 500 {
 			_ = enc.Encode(map[string]any{"type": "message_update", "n": i})
+		}
+		if err := sess.appendText("done"); err != nil {
+			return err
 		}
 		_ = enc.Encode(promptResult(cmd.ID, "completed", nil))
 	case stepRetry:

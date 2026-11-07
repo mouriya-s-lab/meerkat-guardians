@@ -61,7 +61,7 @@ func fixture(t *testing.T) *Runner {
 	}
 	writeSession(t, filepath.Join(dir, "query", ready, "q77.jsonl"), fmt.Sprintf(header, "q-77"), meta("77"), toolResult("pm_replace"))
 	writeSession(t, filepath.Join(dir, "query", ready, "q79.jsonl"), fmt.Sprintf(header, "q-79"), meta("79"), toolResult("read"))
-	reg := sessions.NewRegistry()
+	reg := sessions.NewRegistry(cfg.LaunchLink)
 	co := checkout.New(filepath.Join(dir, "checkouts"))
 	r, err := New(cfg, reg, bases.New(cfg, reg, co), co, nil)
 	if err != nil {

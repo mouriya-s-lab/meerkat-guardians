@@ -31,7 +31,7 @@ func BenchmarkForkSource(b *testing.B) {
 				Runtime: config.Runtime{SessionsDir: dir, MaxConcurrentWarmups: 1},
 				Goals:   config.Goals{Base: config.Goal{Tools: []string{"pm_base_ready"}}},
 			}
-			m := New(cfg, sessions.NewRegistry(), checkout.New(filepath.Join(dir, "checkouts")))
+			m := New(cfg, sessions.NewRegistry(config.LaunchLink{}), checkout.New(filepath.Join(dir, "checkouts")))
 			b.ReportAllocs()
 			for b.Loop() {
 				f, err := m.ForkSource(id)

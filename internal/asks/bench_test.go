@@ -31,7 +31,7 @@ func BenchmarkClaim(b *testing.B) {
 				Runtime: config.Runtime{SessionsDir: dir},
 				Goals:   config.Goals{Query: config.Goal{Tools: []string{"pm_reply", "pm_replace", "pm_escalate"}}},
 			}
-			reg := sessions.NewRegistry()
+			reg := sessions.NewRegistry(config.LaunchLink{})
 			co := checkout.New(filepath.Join(dir, "checkouts"))
 			r, err := New(cfg, reg, bases.New(cfg, reg, co), co, nil)
 			if err != nil {

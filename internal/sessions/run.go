@@ -45,14 +45,16 @@ type Failure struct {
 func (f *Failure) Error() string { return f.Reason }
 
 // Registry runs sessions and remembers, for this process lifetime, which are live. Everything
-// else about a session comes from its file and the failure record beside it.
+// else about a session comes from its file and the failure record beside it. Every omp child it
+// starts receives the configured launch link as PM_LAUNCH_LINK.
 type Registry struct {
-	mu   sync.Mutex
-	live map[string]bool
+	launchLink config.LaunchLink
+	mu         sync.Mutex
+	live       map[string]bool
 }
 
-func NewRegistry() *Registry {
-	return &Registry{live: map[string]bool{}}
+func NewRegistry(launchLink config.LaunchLink) *Registry {
+	return &Registry{launchLink: launchLink, live: map[string]bool{}}
 }
 
 // Run starts omp per s through omprpc.RunSession and records, while it runs, that the session is
@@ -63,6 +65,10 @@ func (r *Registry) Run(ctx context.Context, s Spec) (Result, error) {
 		return Result{}, &Failure{Reason: err.Error()}
 	}
 	meta, err := json.Marshal(s.Meta)
+	if err != nil {
+		return Result{}, &Failure{Reason: err.Error()}
+	}
+	launchLink, err := json.Marshal(r.launchLink)
 	if err != nil {
 		return Result{}, &Failure{Reason: err.Error()}
 	}
@@ -92,6 +98,7 @@ func (r *Registry) Run(ctx context.Context, s Spec) (Result, error) {
 				"PM_GOAL_TOOL=" + strings.Join(s.GoalTools, ","),
 				"PM_CONTINUE=" + s.Continue,
 				"PM_META=" + string(meta),
+				"PM_LAUNCH_LINK=" + string(launchLink),
 			}, s.Env...),
 		},
 		Opening:            s.Opening,

@@ -106,6 +106,9 @@ func TestLoadExample(t *testing.T) {
 	if !cfg.Repos.Readable("oh-my-omp/pm-e2e-design") || cfg.Repos.Readable("oh-my-omp/pm-e2e-agenda") {
 		t.Fatal("Readable wrong")
 	}
+	if want := (LaunchLink{Base: "http://127.0.0.1:47591", Frontend: Frontend{Kind: "tern"}}); cfg.LaunchLink != want {
+		t.Fatalf("launchLink = %+v, want %+v", cfg.LaunchLink, want)
+	}
 }
 
 func TestLoadErrorsNameKeyPath(t *testing.T) {
@@ -198,6 +201,31 @@ func TestLoadErrorsNameKeyPath(t *testing.T) {
 			"unknown project key",
 			map[string][2]string{"shared/project.yaml": {"agenda:   { name: Agenda }", "agenda:   { name: Agenda, options: {} }"}},
 			"shared/project.yaml: fields.agenda.options: unknown field",
+		},
+		{
+			"missing launch link",
+			map[string][2]string{"guardians/guardians.yaml": {"launchLink:\n  base: http://127.0.0.1:47591\n  frontend: { kind: tern }\n", ""}},
+			"guardians/guardians.yaml: launchLink: missing",
+		},
+		{
+			"launch link base not http(s)",
+			map[string][2]string{"guardians/guardians.yaml": {"base: http://127.0.0.1:47591", "base: ftp://127.0.0.1:47599"}},
+			`guardians/guardians.yaml: launchLink.base: "ftp://127.0.0.1:47599" is not an http(s) URL`,
+		},
+		{
+			"missing launch link base",
+			map[string][2]string{"guardians/guardians.yaml": {"  base: http://127.0.0.1:47591\n", ""}},
+			"guardians/guardians.yaml: launchLink.base: missing",
+		},
+		{
+			"empty launch link frontend kind",
+			map[string][2]string{"guardians/guardians.yaml": {"{ kind: tern }", `{ kind: "" }`}},
+			"guardians/guardians.yaml: launchLink.frontend.kind: missing",
+		},
+		{
+			"unknown launch link key",
+			map[string][2]string{"guardians/guardians.yaml": {"{ kind: tern }", "{ kind: tern, port: 1 }"}},
+			"guardians/guardians.yaml: launchLink.frontend.port: unknown field",
 		},
 	}
 	for _, c := range cases {

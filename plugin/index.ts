@@ -8,6 +8,8 @@
  * - PM_META: JSON metadata recorded as the `pm-meta` custom entry of the session; for a query
  *   session it carries `ref` (the implementation issue, owner/name#n) and `ask` (the ask comment id)
  * - PM_GITHUB (query sessions): JSON {pmRepo, project:{owner,number}, fields, code:[{repo,cwd}]}
+ * - PM_LAUNCH_LINK: JSON {base, frontend:{kind}}, the configured omp-dispatch launch link that
+ *   pm_replace writes into the issue it creates
  *
  * Base and fork sessions load this plugin unchanged and list the same tools, so a fork keeps the
  * base's prompt cache; only the environment differs.
@@ -90,6 +92,21 @@ function parseGitHubEnv(text: string): GitHubEnv {
 		throw new Error("pm-guardians plugin: PM_GITHUB lacks pmRepo, project, fields or code");
 	}
 	return env;
+}
+
+interface LaunchLink {
+	base: string;
+	frontend: { kind: string };
+}
+
+function parseLaunchLink(text: string): LaunchLink {
+	const link = JSON.parse(text) as Partial<LaunchLink> | null;
+	const base = link?.base;
+	const kind = link?.frontend?.kind;
+	if (typeof base !== "string" || base === "" || typeof kind !== "string" || kind === "") {
+		throw new Error("pm-guardians plugin: PM_LAUNCH_LINK lacks base or frontend.kind");
+	}
+	return { base, frontend: { kind } };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -210,9 +227,10 @@ const MARKER_SCAN = String.raw`def bodyline: (.body // "") | sub("${JQ_SPACE}+$"
 def marker: (bodyline | capture("<!-- pm:(?<kind>[a-z]+) (?<json>[{].*[}]) -->")) // null;
 def mdata: (marker | .json | try fromjson catch null);`;
 
-function dispatchLink(ref: Ref, cwd: string): string {
-	const spec = encodeURIComponent(JSON.stringify({ cwd, frontend: { kind: "tern" } }));
-	return `http://127.0.0.1:47591/${ref.owner}/${ref.name}/issues/${ref.number}?spec=${spec}`;
+/** The launch link of issue ref, started in cwd: <base>/<owner>/<name>/issues/<n>?spec=<{"cwd","frontend"}>. */
+function dispatchLink(launch: LaunchLink, ref: Ref, cwd: string): string {
+	const spec = encodeURIComponent(JSON.stringify({ cwd, frontend: launch.frontend }));
+	return `${launch.base.replace(/\/+$/, "")}/${ref.owner}/${ref.name}/issues/${ref.number}?spec=${spec}`;
 }
 
 function firstParagraph(text: string): string {
@@ -240,6 +258,12 @@ export default function pmGuardians(pi: ExtensionAPI): void {
 	const github = (): GitHubEnv => {
 		githubEnv ??= parseGitHubEnv(requiredEnv("PM_GITHUB"));
 		return githubEnv;
+	};
+
+	let launchLinkEnv: LaunchLink | undefined;
+	const launchLink = (): LaunchLink => {
+		launchLinkEnv ??= parseLaunchLink(requiredEnv("PM_LAUNCH_LINK"));
+		return launchLinkEnv;
 	};
 
 	// --- gh --------------------------------------------------------------------------------
@@ -474,6 +498,7 @@ export default function pmGuardians(pi: ExtensionAPI): void {
 		async execute(_toolCallId, params) {
 			const q = parseQueryMeta(meta);
 			const env = github();
+			const launch = launchLink();
 			const code = env.code.find(c => c.repo === q.ref.repo);
 			if (!code) throw new Error(`${q.ref.repo} is not a code repository in PM_GITHUB`);
 			const existing = settlement(await markers(q.ref, q.ask), q.ask);
@@ -513,7 +538,7 @@ export default function pmGuardians(pi: ExtensionAPI): void {
 			const newRef = parseRef(`${q.ref.repo}#${created.number}`);
 
 			// c. The dispatch link with the new number, before the marker.
-			const link = dispatchLink(newRef, code.cwd);
+			const link = dispatchLink(launch, newRef, code.cwd);
 			if (!(created.body ?? "").includes(link)) {
 				await rest("PATCH", `repos/${q.ref.repo}/issues/${created.number}`, {
 					body: insertBeforeMarker(created.body ?? "", `[启动 dispatch](${link})`),

@@ -234,8 +234,9 @@ func (r *Registry) Live(id string) bool {
 // failure record without its session file names no openable log, so orphan entries never match.
 func FindFile(dir, id string) (string, bool, error) {
 	var found string
+	buf := make([]byte, headerBuf)
 	err := walk(dir, func(path string) error {
-		h, err := readHeader(path)
+		h, err := readHeader(path, buf)
 		if skipped(err) {
 			return nil
 		}

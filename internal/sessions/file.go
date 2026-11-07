@@ -162,16 +162,24 @@ type header struct {
 	startedAt         time.Time
 }
 
-// openLines opens path for reading line by line, starting with a buffer of bufSize bytes.
-func openLines(path string, bufSize int) (*os.File, *bufio.Scanner, error) {
+// openLines opens path for reading line by line into buf, which grows past its capacity only
+// for a longer line. A walk reads every file it visits into one buf.
+func openLines(path string, buf []byte) (*os.File, *bufio.Scanner, error) {
 	fh, err := os.Open(path)
 	if err != nil {
 		return nil, nil, err
 	}
 	sc := bufio.NewScanner(fh)
-	sc.Buffer(make([]byte, bufSize), maxLineBytes)
+	sc.Buffer(buf, maxLineBytes)
 	return fh, sc, nil
 }
+
+// Initial line buffer sizes: a header and the title lines before it are short; entries are
+// read with the scanner's usual 64 KiB.
+const (
+	headerBuf = 4 << 10
+	entryBuf  = 64 << 10
+)
 
 // scanHeader consumes the lines of sc up to the session header. Lines before it may only be
 // title lines.
@@ -198,8 +206,8 @@ func scanHeader(sc *bufio.Scanner) (header, error) {
 }
 
 // readHeader reads the header of the session file at path and nothing after it.
-func readHeader(path string) (header, error) {
-	fh, sc, err := openLines(path, 4<<10)
+func readHeader(path string, buf []byte) (header, error) {
+	fh, sc, err := openLines(path, buf)
 	if err != nil {
 		return header{}, err
 	}
@@ -209,8 +217,8 @@ func readHeader(path string) (header, error) {
 
 // readMeta reads the latest pm-meta entry of the session file at path (nil if it has none),
 // decoding only the header and the lines that carry a pm-meta token.
-func readMeta(path string) (*Meta, error) {
-	fh, sc, err := openLines(path, 64<<10)
+func readMeta(path string, buf []byte) (*Meta, error) {
+	fh, sc, err := openLines(path, buf)
 	if err != nil {
 		return nil, err
 	}
@@ -241,7 +249,7 @@ var metaToken = []byte(`"pm-meta"`)
 
 // ParseFile reads an omp session file. Lines before the header may only be title lines.
 func ParseFile(path string) (*File, error) {
-	fh, sc, err := openLines(path, 64<<10)
+	fh, sc, err := openLines(path, make([]byte, entryBuf))
 	if err != nil {
 		return nil, err
 	}
@@ -368,8 +376,9 @@ func (c Candidate) Parse() (f *File, ok bool, err error) {
 // write still lists. A missing dir yields none.
 func Newest(dir string) ([]Candidate, error) {
 	var out []Candidate
+	buf := make([]byte, headerBuf)
 	err := walk(dir, func(path string) error {
-		h, err := readHeader(path)
+		h, err := readHeader(path, buf)
 		if skipped(err) {
 			return nil
 		}
@@ -397,8 +406,9 @@ func Newest(dir string) ([]Candidate, error) {
 // session file omp never wrote is judged by the identity it records.
 func Matching(dir string, keep func(*Meta) bool) ([]*File, error) {
 	var out []*File
+	buf := make([]byte, entryBuf)
 	err := walk(dir, func(path string) error {
-		m, err := readMeta(path)
+		m, err := readMeta(path, buf)
 		if skipped(err) || err == nil && (m == nil || !keep(m)) {
 			return nil
 		}

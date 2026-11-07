@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -44,8 +45,9 @@ type Fingerprint struct {
 	Commit       string `json:"commit"`
 }
 
-// File is what the program derives from one omp session file. Entries timestamped before the
-// session header (history copied by a fork) count only for Meta.
+// File is what the program derives from one omp session file and the failure record the
+// program keeps beside it. Entries timestamped before the session header (history copied by a
+// fork) count only for Meta.
 type File struct {
 	Path          string
 	ID            string
@@ -55,6 +57,32 @@ type File struct {
 	Meta          *Meta                // latest pm-meta entry
 	ToolOK        map[string]time.Time // tool name -> timestamp of its latest successful tool result
 	LastError     string               // errorMessage of the latest assistant message that failed
+	Failure       string               // why the program's run of this session failed; see FailurePath
+}
+
+// failureRecord is the file at FailurePath.
+type failureRecord struct {
+	Reason string `json:"reason"`
+}
+
+// FailurePath is where the program records why its run of the session in the omp session file
+// path failed (omp exited, a non-retryable error, the continue limit, the session timeout). omp
+// writes the session file; the program owns this record, so the reason outlives the process.
+func FailurePath(sessionFile string) string {
+	return strings.TrimSuffix(sessionFile, ".jsonl") + ".pm-failure.json"
+}
+
+// writeFailure records reason for the session in sessionFile, atomically.
+func writeFailure(sessionFile, reason string) error {
+	b, err := json.Marshal(failureRecord{Reason: reason})
+	if err != nil {
+		return err
+	}
+	path := FailurePath(sessionFile)
+	if err := os.WriteFile(path+".tmp", b, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(path+".tmp", path)
 }
 
 // GoalAt returns when the latest of tools succeeded, and whether any did.
@@ -148,6 +176,17 @@ func ParseFile(path string) (*File, error) {
 	}
 	if f.ID == "" {
 		return nil, ErrNotSession
+	}
+	switch b, err := os.ReadFile(FailurePath(path)); {
+	case errors.Is(err, fs.ErrNotExist):
+	case err != nil:
+		return nil, err
+	default:
+		var rec failureRecord
+		if err := json.Unmarshal(b, &rec); err != nil {
+			return nil, fmt.Errorf("%s: %w", FailurePath(path), err)
+		}
+		f.Failure = rec.Reason
 	}
 	return f, nil
 }

@@ -105,8 +105,9 @@ func (r *Runner) Read(ctx context.Context, req Request) (Result, error) {
 		SessionDir: filepath.Join(rt.SessionsDir, "proxy", baseID), Cwd: r.co.Dir(base.Repo),
 		ForkFrom:  source.Path,
 		GoalTools: r.cfg.Goals.Proxy.Tools, Opening: opening, Continue: cont,
-		Meta: sessions.Meta{Kind: sessions.KindProxy, Ref: req.Agenda, Base: baseID, Model: base.Model, Seat: req.Seat},
+		Meta:               sessions.Meta{Kind: sessions.KindProxy, Ref: req.Agenda, Base: baseID, Model: base.Model, Seat: req.Seat},
 		MaxContinuePrompts: rt.MaxContinuePrompts,
+		MaxDuration:        rt.SessionTimeout(),
 	})
 	if err != nil {
 		var f *sessions.Failure

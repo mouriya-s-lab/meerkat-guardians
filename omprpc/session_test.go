@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -13,7 +14,8 @@ import (
 
 // fakeSession answers each prompt per the next step of FAKE_PLAN (comma separated; the last step
 // repeats): "goal" calls FAKE_GOAL with the prompt text as its argument, "text" ends the turn
-// without it, "retry" ends it with a retryable error, "fatal" with a non-retryable one.
+// without it, "retry" ends it with a retryable error, "fatal" with a non-retryable one, "loop"
+// keeps calling a non-goal tool and never ends the turn.
 func fakeSession() {
 	out := json.NewEncoder(os.Stdout)
 	plan := strings.Split(os.Getenv("FAKE_PLAN"), ",")
@@ -49,13 +51,21 @@ func fakeSession() {
 			case "fatal":
 				result["status"] = "error"
 				result["error"] = map[string]any{"message": "400 model rejected the request", "retryable": false}
+			case "loop":
+				for i := 0; ; i++ {
+					id := fmt.Sprintf("loop-%s-%d", cmd.ID, i)
+					_ = out.Encode(map[string]any{"type": "tool_execution_start", "toolCallId": id, "toolName": "read",
+						"args": map[string]any{"path": "store.go"}})
+					_ = out.Encode(map[string]any{"type": "tool_execution_end", "toolCallId": id, "toolName": "read", "isError": false})
+					time.Sleep(20 * time.Millisecond)
+				}
 			}
 			_ = out.Encode(result)
 		}
 	}
 }
 
-func runFake(t *testing.T, plan string, maxContinue int) (SessionResult, []string, error) {
+func runFake(t *testing.T, plan string, maxContinue int, maxDuration time.Duration) (SessionResult, []string, error) {
 	t.Helper()
 	exe, err := os.Executable()
 	if err != nil {
@@ -72,13 +82,14 @@ func runFake(t *testing.T, plan string, maxContinue int) (SessionResult, []strin
 		MaxContinuePrompts: maxContinue,
 		ReadyTimeout:       10 * time.Second,
 		ExitGrace:          5 * time.Second,
+		MaxDuration:        maxDuration,
 		OnReady:            func(id, file string) { ready = append(ready, id, file) },
 	})
 	return res, ready, err
 }
 
 func TestRunSessionGoalReached(t *testing.T) {
-	res, ready, err := runFake(t, "goal", 3)
+	res, ready, err := runFake(t, "goal", 3, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +103,7 @@ func TestRunSessionGoalReached(t *testing.T) {
 }
 
 func TestRunSessionContinuesUntilGoal(t *testing.T) {
-	res, _, err := runFake(t, "text,retry,goal", 3)
+	res, _, err := runFake(t, "text,retry,goal", 3, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +113,7 @@ func TestRunSessionContinuesUntilGoal(t *testing.T) {
 }
 
 func TestRunSessionNonRetryableError(t *testing.T) {
-	_, _, err := runFake(t, "text,fatal", 3)
+	_, _, err := runFake(t, "text,fatal", 3, 0)
 	var f *SessionFailure
 	if !errors.As(err, &f) || f.Reason != "400 model rejected the request" {
 		t.Fatalf("err = %v", err)
@@ -110,9 +121,24 @@ func TestRunSessionNonRetryableError(t *testing.T) {
 }
 
 func TestRunSessionContinueLimit(t *testing.T) {
-	_, _, err := runFake(t, "text", 2)
+	_, _, err := runFake(t, "text", 2, 0)
 	var f *SessionFailure
 	if !errors.As(err, &f) || f.Reason != "continue limit reached" {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+// A turn that keeps calling a non-goal tool never yields a prompt_result, so only MaxDuration
+// ends the session.
+func TestRunSessionTimeout(t *testing.T) {
+	start := time.Now()
+	_, _, err := runFake(t, "loop", 3, 1500*time.Millisecond)
+	elapsed := time.Since(start)
+	var f *SessionFailure
+	if !errors.As(err, &f) || f.Reason != "session timeout after 1.5s" {
+		t.Fatalf("err = %v", err)
+	}
+	if elapsed < 1500*time.Millisecond || elapsed > 10*time.Second {
+		t.Fatalf("returned after %v", elapsed)
 	}
 }

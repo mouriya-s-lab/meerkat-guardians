@@ -133,6 +133,7 @@ func (m *Manager) run(b config.Base) error {
 		GoalTools: m.cfg.Goals.Base.Tools, Opening: opening, Continue: cont,
 		Meta:               sessions.Meta{Kind: sessions.KindBase, Base: b.ID, Model: b.Model, Fingerprint: &fp},
 		MaxContinuePrompts: rt.MaxContinuePrompts,
+		MaxDuration:        rt.SessionTimeout(),
 	})
 	return err
 }
@@ -217,6 +218,9 @@ func (m *Manager) List(ctx context.Context) ([]View, error) {
 		default:
 			v.State = "failed"
 			reason := failure
+			if reason == "" && len(files) > 0 {
+				reason = files[0].Failure
+			}
 			if reason == "" && len(files) > 0 {
 				reason = files[0].LastError
 			}

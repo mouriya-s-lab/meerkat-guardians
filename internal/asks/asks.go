@@ -240,6 +240,7 @@ func (r *Runner) spec(ctx context.Context, a ask, base config.Base, source *sess
 		},
 		Env:                []string{r.githubEnv},
 		MaxContinuePrompts: rt.MaxContinuePrompts,
+		MaxDuration:        rt.SessionTimeout(),
 	}, nil
 }
 

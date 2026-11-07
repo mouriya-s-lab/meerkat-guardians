@@ -77,18 +77,18 @@ func TestParseIgnores(t *testing.T) {
 
 func TestParseInvalid(t *testing.T) {
 	for body, want := range map[string]string{
-		`<!-- pm:ask {"v":1,"tier":"simple",} -->`:                 "pm:ask: invalid character",
-		`<!-- pm:ask {"tier":"simple","session":"s"} -->`:          "pm:ask: v missing",
-		`<!-- pm:ask {"v":2,"tier":"simple","session":"s"} -->`:    "pm:ask: v is 2, want 1",
-		`<!-- pm:ask {"v":"1","tier":"simple","session":"s"} -->`:  "pm:ask: v is not an integer",
-		`<!-- pm:ask {"v":1,"tier":"urgent","session":"s"} -->`:    `pm:ask: tier "urgent" is not simple or complex`,
-		`<!-- pm:ask {"v":1,"tier":"simple"} -->`:                  "pm:ask: session missing",
-		`<!-- pm:reply {"v":1,"ask":"7","decision":null} -->`:      "pm:reply: ask is not an integer",
-		`<!-- pm:reply {"v":1,"ask":7.5,"decision":null} -->`:      "pm:reply: ask is not an integer",
-		`<!-- pm:reply {"v":1,"ask":7} -->`:                        "pm:reply: decision missing",
-		`<!-- pm:reply {"v":1,"ask":7,"decision":3} -->`:           "pm:reply: decision is not a string",
-		`<!-- pm:replaced {"v":1,"by":"o/c#2"} -->`:                "pm:replaced: ask missing",
-		`<!-- pm:replaced {"v":1,"ask":7,"by":null} -->`:           "pm:replaced: by is not a string",
+		`<!-- pm:ask {"v":1,"tier":"simple",} -->`:                  "pm:ask: invalid character",
+		`<!-- pm:ask {"tier":"simple","session":"s"} -->`:           "pm:ask: v missing",
+		`<!-- pm:ask {"v":2,"tier":"simple","session":"s"} -->`:     "pm:ask: v is 2, want 1",
+		`<!-- pm:ask {"v":"1","tier":"simple","session":"s"} -->`:   "pm:ask: v is not an integer",
+		`<!-- pm:ask {"v":1,"tier":"urgent","session":"s"} -->`:     `pm:ask: tier "urgent" is not simple or complex`,
+		`<!-- pm:ask {"v":1,"tier":"simple"} -->`:                   "pm:ask: session missing",
+		`<!-- pm:reply {"v":1,"ask":"7","decision":null} -->`:       "pm:reply: ask is not an integer",
+		`<!-- pm:reply {"v":1,"ask":7.5,"decision":null} -->`:       "pm:reply: ask is not an integer",
+		`<!-- pm:reply {"v":1,"ask":7} -->`:                         "pm:reply: decision missing",
+		`<!-- pm:reply {"v":1,"ask":7,"decision":3} -->`:            "pm:reply: decision is not a string",
+		`<!-- pm:replaced {"v":1,"by":"o/c#2"} -->`:                 "pm:replaced: ask missing",
+		`<!-- pm:replaced {"v":1,"ask":7,"by":null} -->`:            "pm:replaced: by is not a string",
 		`<!-- pm:escalated {"v":1,"ask":null,"agenda":"o/a#1"} -->`: "pm:escalated: ask is not an integer",
 	} {
 		m, err := Parse("text\n\n" + body)

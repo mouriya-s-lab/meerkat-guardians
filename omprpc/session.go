@@ -16,6 +16,9 @@ type SessionSpec struct {
 	MaxContinuePrompts int
 	ReadyTimeout       time.Duration // bounds the wait for the ready frame
 	ExitGrace          time.Duration // after stdin closes, the process is killed if it has not exited by then
+	// MaxDuration bounds the whole session, from starting omp to a goal tool succeeding; zero
+	// means no bound.
+	MaxDuration time.Duration
 	// OnReady, if set, is called once the session id and file are known, before the opening prompt.
 	OnReady func(sessionID, sessionFile string)
 }
@@ -33,21 +36,37 @@ func (f *SessionFailure) Error() string { return f.Reason }
 
 // RunSession starts omp, sends the opening prompt and holds the session until a goal tool
 // succeeds, then closes stdin and waits for exit. It fails when omp exits first, a prompt_result
-// reports a non-retryable error, MaxContinuePrompts continue prompts did not reach the goal, or
-// ctx ends. LLM retries are omp's; RunSession never retries a turn itself.
+// reports a non-retryable error, MaxContinuePrompts continue prompts did not reach the goal,
+// MaxDuration elapses (reason "session timeout after <N>s"), or ctx ends; a failed session's omp
+// is killed. LLM retries are omp's; RunSession never retries a turn itself.
 func RunSession(ctx context.Context, s SessionSpec) (SessionResult, error) {
 	fail := func(reason string) (SessionResult, error) { return SessionResult{}, &SessionFailure{Reason: reason} }
+
+	var timeout *SessionFailure
+	if s.MaxDuration > 0 {
+		timeout = &SessionFailure{Reason: fmt.Sprintf("session timeout after %gs", s.MaxDuration.Seconds())}
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeoutCause(ctx, s.MaxDuration, timeout)
+		defer cancel()
+	}
+	timedOut := func() bool { return timeout != nil && context.Cause(ctx) == error(timeout) }
 
 	readyCtx, cancel := context.WithTimeout(ctx, s.ReadyTimeout)
 	proc, err := Start(readyCtx, s.Options)
 	cancel()
 	if err != nil {
+		if timedOut() {
+			return SessionResult{}, timeout
+		}
 		return fail(err.Error())
 	}
 	res, err := hold(ctx, proc, s)
 	if err != nil {
 		_ = proc.Kill()
 		_ = proc.Wait()
+		if timedOut() {
+			return SessionResult{}, timeout
+		}
 	}
 	return res, err
 }

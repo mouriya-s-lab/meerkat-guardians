@@ -3,11 +3,9 @@ package sessions
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io/fs"
 	"log/slog"
 	"os"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -154,17 +152,32 @@ type Summary struct {
 	Parent    *string    `json:"parent"`
 }
 
-// List derives session rows from every session file under dir, newest first, at most limit rows.
-// A session whose file omp never wrote lists from its failure record alone (§I).
+// List derives session rows from the session files under dir, newest first, at most limit rows.
+// Only the files that make the rows are parsed; the rest are known by their header. A session
+// whose file omp never wrote lists from its failure record alone (§I).
 func (r *Registry) List(dir string, goalTools map[Kind][]string, limit int) ([]Summary, error) {
-	files, err := ScanDir(dir)
+	cands, err := Newest(dir)
 	if err != nil {
 		return nil, err
 	}
-	sort.Slice(files, func(i, j int) bool { return files[i].StartedAt.After(files[j].StartedAt) })
-	if len(files) > limit {
-		files = files[:limit]
+	files := make([]*File, 0, min(limit, len(cands)))
+	for _, c := range cands {
+		if len(files) == limit {
+			break
+		}
+		f, ok, err := c.Parse()
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			files = append(files, f)
+		}
 	}
+	return r.summaries(files, goalTools), nil
+}
+
+// summaries derives one row per file, in order.
+func (r *Registry) summaries(files []*File, goalTools map[Kind][]string) []Summary {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	out := make([]Summary, 0, len(files))
@@ -212,7 +225,7 @@ func (r *Registry) List(dir string, goalTools map[Kind][]string, limit int) ([]S
 		}
 		out = append(out, s)
 	}
-	return out, nil
+	return out
 }
 
 // Live reports whether the session id is held by a running process.
@@ -222,24 +235,27 @@ func (r *Registry) Live(id string) bool {
 	return r.live[id]
 }
 
-// FindFile returns the session file under dir whose header id is id. A failure record
-// without its session file names no openable log, so orphan entries never match.
+// FindFile returns the session file under dir whose header id is id, reading headers only. A
+// failure record without its session file names no openable log, so orphan entries never match.
 func FindFile(dir, id string) (string, bool, error) {
-	files, err := ScanDir(dir)
+	var found string
+	lr := newLineReader(headerBuf)
+	err := walk(dir, func(path string) error {
+		h, err := readHeader(path, lr)
+		if skipped(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if h.id != id {
+			return nil
+		}
+		found = path
+		return fs.SkipAll
+	}, nil)
 	if err != nil {
 		return "", false, err
 	}
-	for _, f := range files {
-		if f.ID != id {
-			continue
-		}
-		if _, err := os.Stat(f.Path); err != nil {
-			if errors.Is(err, fs.ErrNotExist) {
-				continue
-			}
-			return "", false, err
-		}
-		return f.Path, true, nil
-	}
-	return "", false, nil
+	return found, found != "", nil
 }

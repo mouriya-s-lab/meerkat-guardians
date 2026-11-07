@@ -3,12 +3,15 @@ package sessions
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -120,14 +123,16 @@ var ErrNotSession = errors.New("not an omp session file")
 
 const maxLineBytes = 64 << 20
 
+// entry is what one line is judged on. A line that does not decode into it is skipped (a line
+// being written concurrently). The data payload is not part of it: only pm-meta lines decode
+// theirs, through metaLine.
 type entry struct {
-	Type          string          `json:"type"`
-	ID            string          `json:"id"`
-	Timestamp     string          `json:"timestamp"`
-	ParentSession string          `json:"parentSession"`
-	CustomType    string          `json:"customType"`
-	Data          json.RawMessage `json:"data"`
-	Message       *struct {
+	Type          string `json:"type"`
+	ID            string `json:"id"`
+	Timestamp     string `json:"timestamp"`
+	ParentSession string `json:"parentSession"`
+	CustomType    string `json:"customType"`
+	Message       struct {
 		Role         string `json:"role"`
 		ToolName     string `json:"toolName"`
 		IsError      bool   `json:"isError"`
@@ -135,47 +140,210 @@ type entry struct {
 	} `json:"message"`
 }
 
-// ParseFile reads an omp session file. Lines before the header may only be title lines.
-func ParseFile(path string) (*File, error) {
+func (e *entry) isMeta() bool { return e.Type == "custom" && e.CustomType == "pm-meta" }
+
+// metaLine is a pm-meta line with its payload.
+type metaLine struct {
+	entry
+	Data json.RawMessage `json:"data"`
+}
+
+// meta decodes the payload of pm-meta line l; ok is false when it is not a Meta.
+func (l *metaLine) meta() (*Meta, bool) {
+	var m Meta
+	if json.Unmarshal(l.Data, &m) != nil {
+		return nil, false
+	}
+	return &m, true
+}
+
+// header is the session entry that opens a session file.
+type header struct {
+	id, parentSession string
+	startedAt         time.Time
+}
+
+// lineReader reads the lines of one file after another as bufio.Scanner with ScanLines does
+// (the newline and a carriage return before it are dropped, a last line without a newline still
+// counts, a line over maxLineBytes is bufio.ErrTooLong). A line that does not fit the reader's
+// buffer is assembled in long, which the lineReader keeps for the next file, so a walk that
+// reuses one lineReader grows it once for its longest line.
+type lineReader struct {
+	r    *bufio.Reader
+	long []byte
+	line []byte
+	err  error
+}
+
+// Reader buffer sizes: a header and the title lines before it are short; entries are read in
+// 64 KiB chunks, the size bufio.Scanner starts with.
+const (
+	headerBuf = 4 << 10
+	entryBuf  = 64 << 10
+)
+
+func newLineReader(size int) *lineReader {
+	return &lineReader{r: bufio.NewReaderSize(nil, size)}
+}
+
+// open starts reading the file at path; the caller closes the returned file.
+func (l *lineReader) open(path string) (*os.File, error) {
 	fh, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	defer fh.Close()
-	sc := bufio.NewScanner(fh)
-	sc.Buffer(make([]byte, 64<<10), maxLineBytes)
-	f := &File{Path: path, ToolOK: map[string]time.Time{}}
-	for sc.Scan() {
-		var e entry
-		if err := json.Unmarshal(sc.Bytes(), &e); err != nil {
-			continue // a line being written concurrently
-		}
-		if f.ID == "" {
-			switch e.Type {
-			case "title":
-				continue
-			case "session":
-				f.ID = e.ID
-				f.ParentSession = e.ParentSession
-				f.StartedAt = parseTime(e.Timestamp)
-				f.LastAt = f.StartedAt
-				continue
-			default:
-				return nil, ErrNotSession
+	l.r.Reset(fh)
+	l.line, l.err = nil, nil
+	return fh, nil
+}
+
+// scan advances to the next line, which bytes returns until the following scan.
+func (l *lineReader) scan() bool {
+	if l.err != nil {
+		return false
+	}
+	line, err := l.r.ReadSlice('\n')
+	if err == bufio.ErrBufferFull {
+		l.long = append(l.long[:0], line...)
+		for err == bufio.ErrBufferFull {
+			if len(l.long) > maxLineBytes {
+				l.err = bufio.ErrTooLong
+				return false
 			}
+			line, err = l.r.ReadSlice('\n')
+			l.long = append(l.long, line...)
+		}
+		line = l.long
+	}
+	switch {
+	case err == io.EOF && len(line) == 0:
+		l.err = err
+		return false
+	case err != nil && err != io.EOF:
+		l.err = err
+		return false
+	}
+	l.err = err // io.EOF after a last line without a newline: this line, then stop
+	if len(line) > maxLineBytes {
+		l.err = bufio.ErrTooLong
+		return false
+	}
+	line = bytes.TrimSuffix(line, []byte{'\n'})
+	l.line = bytes.TrimSuffix(line, []byte{'\r'})
+	return true
+}
+
+func (l *lineReader) bytes() []byte { return l.line }
+
+// failed is the read error that ended the lines, nil at the end of the file.
+func (l *lineReader) failed() error {
+	if l.err == io.EOF {
+		return nil
+	}
+	return l.err
+}
+
+// scanHeader consumes the lines of l up to the session header. Lines before it may only be
+// title lines.
+func scanHeader(l *lineReader) (header, error) {
+	for l.scan() {
+		var e entry
+		if json.Unmarshal(l.bytes(), &e) != nil {
+			continue
+		}
+		switch e.Type {
+		case "title":
+		case "session":
+			if e.ID != "" {
+				return header{id: e.ID, parentSession: e.ParentSession, startedAt: parseTime(e.Timestamp)}, nil
+			}
+		default:
+			return header{}, ErrNotSession
+		}
+	}
+	if err := l.failed(); err != nil {
+		return header{}, err
+	}
+	return header{}, ErrNotSession
+}
+
+// readHeader reads the header of the session file at path and nothing after it.
+func readHeader(path string, l *lineReader) (header, error) {
+	fh, err := l.open(path)
+	if err != nil {
+		return header{}, err
+	}
+	defer fh.Close()
+	return scanHeader(l)
+}
+
+// readMeta reads the latest pm-meta entry of the session file at path (nil if it has none),
+// decoding only the header and the lines that carry a pm-meta token.
+func readMeta(path string, l *lineReader) (*Meta, error) {
+	fh, err := l.open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer fh.Close()
+	if _, err := scanHeader(l); err != nil {
+		return nil, err
+	}
+	var meta *Meta
+	for l.scan() {
+		line := l.bytes()
+		if !bytes.Contains(line, metaToken) {
+			continue
+		}
+		var ml metaLine
+		if json.Unmarshal(line, &ml) != nil || !ml.isMeta() {
+			continue
+		}
+		if m, ok := ml.meta(); ok {
+			meta = m
+		}
+	}
+	return meta, l.failed()
+}
+
+// metaToken is in every line that carries a pm-meta entry: omp writes the customType value as
+// a plain JSON string.
+var metaToken = []byte(`"pm-meta"`)
+
+// ParseFile reads an omp session file. Lines before the header may only be title lines.
+func ParseFile(path string) (*File, error) {
+	l := newLineReader(entryBuf)
+	fh, err := l.open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer fh.Close()
+	h, err := scanHeader(l)
+	if err != nil {
+		return nil, err
+	}
+	f := &File{
+		Path: path, ID: h.id, ParentSession: h.parentSession, StartedAt: h.startedAt, LastAt: h.startedAt,
+		ToolOK: map[string]time.Time{},
+	}
+	for l.scan() {
+		var e entry
+		if json.Unmarshal(l.bytes(), &e) != nil {
+			continue
 		}
 		ts := parseTime(e.Timestamp)
 		if ts.After(f.LastAt) {
 			f.LastAt = ts
 		}
-		if e.Type == "custom" && e.CustomType == "pm-meta" {
-			var m Meta
-			if json.Unmarshal(e.Data, &m) == nil {
-				f.Meta = &m
+		if e.isMeta() {
+			var ml metaLine
+			if json.Unmarshal(l.bytes(), &ml) == nil {
+				if m, ok := ml.meta(); ok {
+					f.Meta = m
+				}
 			}
 			continue
 		}
-		if e.Type != "message" || e.Message == nil || ts.Before(f.StartedAt) {
+		if e.Type != "message" || ts.Before(f.StartedAt) {
 			continue
 		}
 		switch e.Message.Role {
@@ -189,11 +357,8 @@ func ParseFile(path string) (*File, error) {
 			}
 		}
 	}
-	if err := sc.Err(); err != nil {
+	if err := l.failed(); err != nil {
 		return nil, err
-	}
-	if f.ID == "" {
-		return nil, ErrNotSession
 	}
 	switch b, err := os.ReadFile(FailurePath(path)); {
 	case errors.Is(err, fs.ErrNotExist):
@@ -209,13 +374,17 @@ func ParseFile(path string) (*File, error) {
 	return f, nil
 }
 
-// ScanDir parses every session file under dir (recursively); other .jsonl files are
-// skipped. A failure record whose session file omp never wrote yields an entry of its own,
-// so a session killed before its first write still appears in the list. A missing dir
-// yields no files.
-func ScanDir(dir string) ([]*File, error) {
-	var files []*File
-	var orphans []string
+// skipped reports whether err means the .jsonl file at hand is no session to list: not an omp
+// session file, or gone since the directory was read.
+func skipped(err error) bool {
+	return errors.Is(err, ErrNotSession) || errors.Is(err, fs.ErrNotExist)
+}
+
+// walk calls session for every .jsonl file under dir (recursively, in lexical order) and then
+// record, when not nil, for every failure record under it. session may return fs.SkipAll to
+// stop the walk. A missing dir has no files.
+func walk(dir string, session func(path string) error, record func(path string) error) error {
+	var records []string
 	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			if errors.Is(err, fs.ErrNotExist) {
@@ -223,37 +392,109 @@ func ScanDir(dir string) ([]*File, error) {
 			}
 			return err
 		}
-		if d.IsDir() {
-			return nil
-		}
 		switch {
+		case d.IsDir():
 		case strings.HasSuffix(path, ".jsonl"):
-			f, err := ParseFile(path)
-			if errors.Is(err, ErrNotSession) || errors.Is(err, fs.ErrNotExist) {
-				return nil
-			}
-			if err != nil {
-				return err
-			}
-			files = append(files, f)
-		case strings.HasSuffix(path, ".pm-failure.json"):
-			orphans = append(orphans, path)
+			return session(path)
+		case record != nil && strings.HasSuffix(path, ".pm-failure.json"):
+			records = append(records, path)
 		}
 		return nil
+	})
+	if err != nil || record == nil {
+		return err
+	}
+	for _, path := range records {
+		if err := record(path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Candidate is one session under a directory, known before its entries are read: a session
+// file by its header, or a failure record whose session file omp never wrote.
+type Candidate struct {
+	path      string
+	startedAt time.Time
+	orphan    *File
+}
+
+// Parse derives the session's File: the session file's entries, or the failure record alone.
+// ok is false when the file turned out to be no session to list (see skipped).
+func (c Candidate) Parse() (f *File, ok bool, err error) {
+	if c.orphan != nil {
+		return c.orphan, true, nil
+	}
+	f, err = ParseFile(c.path)
+	if skipped(err) {
+		return nil, false, nil
+	}
+	return f, err == nil, err
+}
+
+// Newest lists the sessions under dir (recursively) newest first by header timestamp, reading
+// only the header of each session file; other .jsonl files are skipped. A failure record whose
+// session file omp never wrote is a session of its own, so a session killed before its first
+// write still lists. A missing dir yields none.
+func Newest(dir string) ([]Candidate, error) {
+	var out []Candidate
+	lr := newLineReader(headerBuf)
+	err := walk(dir, func(path string) error {
+		h, err := readHeader(path, lr)
+		if skipped(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		out = append(out, Candidate{path: path, startedAt: h.startedAt})
+		return nil
+	}, func(recPath string) error {
+		f, ok, err := orphanFile(recPath)
+		if ok {
+			out = append(out, Candidate{path: f.Path, startedAt: f.StartedAt, orphan: f})
+		}
+		return err
 	})
 	if err != nil {
 		return nil, err
 	}
-	for _, recPath := range orphans {
-		f, ok, err := orphanFile(recPath)
+	sort.Slice(out, func(i, j int) bool { return out[i].startedAt.After(out[j].startedAt) })
+	return out, nil
+}
+
+// Matching returns the sessions under dir whose latest pm-meta keep accepts. Of a session file
+// keep rejects only the header and the pm-meta entries are decoded; a failure record whose
+// session file omp never wrote is judged by the identity it records.
+func Matching(dir string, keep func(*Meta) bool) ([]*File, error) {
+	var out []*File
+	lr := newLineReader(entryBuf)
+	err := walk(dir, func(path string) error {
+		m, err := readMeta(path, lr)
+		if skipped(err) || err == nil && (m == nil || !keep(m)) {
+			return nil
+		}
 		if err != nil {
-			return nil, err
+			return err
 		}
-		if ok {
-			files = append(files, f)
+		f, err := ParseFile(path)
+		if skipped(err) {
+			return nil
 		}
-	}
-	return files, nil
+		if err != nil {
+			return err
+		}
+		out = append(out, f)
+		return nil
+	}, func(recPath string) error {
+		f, ok, err := orphanFile(recPath)
+		if ok && keep(f.Meta) {
+			out = append(out, f)
+		}
+		return err
+	})
+	return out, err
 }
 
 // orphanFile derives the session the failure record at recPath names when its session file

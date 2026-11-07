@@ -189,14 +189,13 @@ func (r *Runner) claim(comment int64) (bool, error) {
 	if r.active[comment] {
 		return false, nil
 	}
-	files, err := sessions.ScanDir(r.Dir())
+	files, err := sessions.Matching(r.Dir(), func(m *sessions.Meta) bool {
+		return m.Kind == sessions.KindQuery && m.Ask == comment
+	})
 	if err != nil {
 		return false, err
 	}
 	for _, f := range files {
-		if f.Meta == nil || f.Meta.Kind != sessions.KindQuery || f.Meta.Ask != comment {
-			continue
-		}
 		if _, done := f.GoalAt(r.cfg.Goals.Query.Tools); done || r.reg.Live(f.ID) {
 			return false, nil
 		}

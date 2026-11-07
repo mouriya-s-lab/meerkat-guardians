@@ -546,7 +546,7 @@ export default function pmGuardians(pi: ExtensionAPI): void {
 				done.push("added the dispatch link");
 			}
 
-			// d. Sub-issue of the old issue's parent; Project Kind=Implementation, Status=Todo.
+			// d. Sub-issue of the old issue's parent; Project Kind=Implementation, Status=Todo, Proposer=Guardians.
 			const issues = await graphql<{
 				repository: {
 					oldIssue: { id: string; parent: { id: string; url: string } | null };
@@ -579,7 +579,8 @@ export default function pmGuardians(pi: ExtensionAPI): void {
 			const newItem = await projectItem(newIssue.id);
 			await setOption(newItem, f.kind.name, f.kind.options.implementation);
 			await setOption(newItem, f.status.name, f.status.options.todo);
-			done.push(`Project ${f.kind.name}=${f.kind.options.implementation}, ${f.status.name}=${f.status.options.todo}`);
+			await setOption(newItem, f.proposer.name, f.proposer.options.guardians);
+			done.push(`Project ${f.kind.name}=${f.kind.options.implementation}, ${f.status.name}=${f.status.options.todo}, ${f.proposer.name}=${f.proposer.options.guardians}`);
 
 			// e. The old issue: replaced marker, Status=Superseded, closed as not planned.
 			if (existing) {

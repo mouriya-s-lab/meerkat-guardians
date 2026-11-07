@@ -9,6 +9,19 @@ Pepgent PM intent guardians: a Go daemon that keeps pre-warmed headless omp **ba
 
 `omprpc/` is a public Go package that `oh-my-omp/pm-council` imports: an omp RPC client (ready frame, id-correlated commands, events) and `RunSession`, the shared headless-session loop that holds a session until one of its goal tools succeeds.
 
+## fake-omp
+
+`cmd/fake-omp` is a deterministic fake omp for single-repo acceptance runs (pm-council tests, guardian sessions): point a configuration's `omp.bin` at it and the session's behaviour comes entirely from the environment, so timeouts, failures and a successful goal tool are repeatable without a real LLM session. Build it with `go build -o <path> ./cmd/fake-omp`.
+
+| Env | Meaning |
+|---|---|
+| `FAKE_OMP_PLAN` | comma-separated steps `goal/text/retry/fatal/loop/die`, one per prompt, the last repeating; `goal` calls the goal tool, `text` completes the turn without one, `retry`/`fatal` end it with a retryable/non-retryable error, `loop` keeps calling a non-goal tool and never completes, `die` writes the stderr tail and exits 3 |
+| `FAKE_OMP_GOAL` | the goal tool's name; default: the first entry of `PM_GOAL_TOOLS`, else `pm_return_facts` |
+| `FAKE_OMP_ARGS` | path of a JSON file whose object becomes the goal tool's arguments; default `{"facts": <prompt text>}` |
+| `FAKE_OMP_DELAY_MS` | delay before each step, in milliseconds |
+
+The only argument it consumes is `--session-dir <dir>`; it creates `<UTC time>_<uuid>.jsonl` there before the ready frame, writes the session header and appends an omp entry per tool call and result, and `get_state` answers with that path. Every other argument is ignored.
+
 ## Run locally
 
 Requires Go, `omp` on `PATH`, `gh`, `yq` (mikefarah/yq v4), `git` with a GitHub credential helper (`gh auth setup-git`), and an omp login in `~/.omp/agent/agent.db`.

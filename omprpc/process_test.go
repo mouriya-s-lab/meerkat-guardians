@@ -1,69 +1,29 @@
 package omprpc
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
-	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/oh-my-omp/pm-guardians/internal/fakeomp"
 )
 
-// The test binary doubles as a fake omp: with FAKE_OMP set it speaks the RPC protocol on stdio.
+// The test binary doubles as a fake omp: every FAKE_OMP_PLAN set runs fakeomp on stdio, so
+// the tests drive the same implementation cmd/fake-omp serves.
 func TestMain(m *testing.M) {
-	switch os.Getenv("FAKE_OMP") {
-	case "":
-		os.Exit(m.Run())
-	case "die":
-		fmt.Fprintln(os.Stderr, "fatal: model not found: nope/nope")
-		os.Exit(3)
-	case "rpc":
-		fakeRPC()
-		os.Exit(0)
-	case "session":
-		fakeSession()
-		os.Exit(0)
+	if os.Getenv("FAKE_OMP_PLAN") != "" {
+		os.Exit(fakeomp.Main(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
 	}
+	os.Exit(m.Run())
 }
 
-func fakeRPC() {
-	out := json.NewEncoder(os.Stdout)
-	// A frame before ready is not part of the protocol; emit stderr noise instead.
-	fmt.Fprintln(os.Stderr, "booting")
-	_ = out.Encode(map[string]any{"type": "ready", "protocolVersion": 1})
-	sc := bufio.NewScanner(os.Stdin)
-	for sc.Scan() {
-		var cmd map[string]any
-		if err := json.Unmarshal(sc.Bytes(), &cmd); err != nil {
-			continue
-		}
-		id, _ := cmd["id"].(string)
-		switch cmd["type"] {
-		case "get_state":
-			_ = out.Encode(map[string]any{"type": "response", "id": id, "command": "get_state", "success": true,
-				"data": map[string]any{"sessionId": "s-1", "sessionFile": "/tmp/s-1.jsonl"}})
-		case "prompt":
-			_ = out.Encode(map[string]any{"type": "response", "id": id, "command": "prompt", "success": true})
-			// Many events while the client is not reading: exercises the unbounded queue.
-			for i := range 500 {
-				_ = out.Encode(map[string]any{"type": "message_update", "n": i})
-			}
-			_ = out.Encode(map[string]any{"type": "tool_execution_start", "toolCallId": "t1", "toolName": "pm_return_facts",
-				"args": map[string]any{"facts": "main.go:15"}})
-			_ = out.Encode(map[string]any{"type": "tool_execution_end", "toolCallId": "t1", "toolName": "pm_return_facts",
-				"isError": false, "result": map[string]any{"content": []any{map[string]any{"type": "text", "text": "recorded"}}}})
-			_ = out.Encode(map[string]any{"type": "prompt_result", "id": id, "agentInvoked": true, "status": "error",
-				"error": map[string]any{"message": "429 rate limited", "retryable": true}})
-		default:
-			_ = out.Encode(map[string]any{"type": "response", "id": id, "command": cmd["type"], "success": false,
-				"error": "Unknown command"})
-		}
-	}
-}
-
-func startFake(t *testing.T, mode string) (*Process, error) {
+// startFake starts the test binary as a fake omp. env carries the extra control variables;
+// args carries the arguments (at least --session-dir).
+func startFake(t *testing.T, plan string, args []string, env ...string) (*Process, error) {
 	t.Helper()
 	exe, err := os.Executable()
 	if err != nil {
@@ -71,18 +31,44 @@ func startFake(t *testing.T, mode string) (*Process, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	return Start(ctx, Options{Bin: exe, Env: []string{"FAKE_OMP=" + mode}})
+	return Start(ctx, Options{Bin: exe, Args: args,
+		Env: append([]string{"FAKE_OMP_PLAN=" + plan}, env...)})
+}
+
+// goalEnv resolves the goal step's canned arguments file once per test.
+func goalEnv(t *testing.T) []string {
+	t.Helper()
+	argsFile := filepath.Join(t.TempDir(), "args.json")
+	if err := os.WriteFile(argsFile, []byte(`{"facts":"main.go:15"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return []string{"FAKE_OMP_GOAL=pm_return_facts", "FAKE_OMP_ARGS=" + argsFile}
 }
 
 func TestStartFailsWithStderrTail(t *testing.T) {
-	_, err := startFake(t, "die")
+	_, err := startFake(t, "die", nil)
 	if err == nil || !strings.Contains(err.Error(), "model not found: nope/nope") {
 		t.Fatalf("want error with stderr tail, got %v", err)
 	}
 }
 
+func TestStartFailsOnUnknownPlanStep(t *testing.T) {
+	_, err := startFake(t, "brew", nil)
+	if err == nil || !strings.Contains(err.Error(), "unknown plan step") {
+		t.Fatalf("want unknown-plan-step error, got %v", err)
+	}
+}
+
+func TestStartFailsWithoutSessionDir(t *testing.T) {
+	_, err := startFake(t, "goal", nil)
+	if err == nil || !strings.Contains(err.Error(), "--session-dir") {
+		t.Fatalf("want missing --session-dir error, got %v", err)
+	}
+}
+
 func TestCallAndEvents(t *testing.T) {
-	p, err := startFake(t, "rpc")
+	sessDir := t.TempDir()
+	p, err := startFake(t, "text,goal,retry", []string{"--session-dir", sessDir}, goalEnv(t)...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,9 +78,26 @@ func TestCallAndEvents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var st struct{ SessionID string }
-	if err := json.Unmarshal(data, &st); err != nil || st.SessionID != "s-1" {
-		t.Fatalf("get_state data %s (%v)", data, err)
+	var st struct {
+		SessionID   string
+		SessionFile string
+	}
+	if err := json.Unmarshal(data, &st); err != nil {
+		t.Fatal(err)
+	}
+	if st.SessionID == "" || !strings.Contains(st.SessionFile, sessDir+"/") ||
+		!strings.Contains(filepath.Base(st.SessionFile), st.SessionID) ||
+		!strings.HasSuffix(st.SessionFile, ".jsonl") {
+		t.Fatalf("get_state data %s, want a %s/<UTC>_<uuid>.jsonl named after its id", data, sessDir)
+	}
+	// The session file exists from before the ready frame, with get_state's id as its
+	// header id.
+	b, err := os.ReadFile(st.SessionFile)
+	if err != nil {
+		t.Fatalf("session file: %v", err)
+	}
+	if !strings.Contains(string(b), `"id":"`+st.SessionID+`"`) {
+		t.Fatalf("session header lacks get_state's id: %s", b)
 	}
 
 	if _, err := p.Call(ctx, map[string]any{"type": "bogus"}); err == nil ||
@@ -102,21 +105,33 @@ func TestCallAndEvents(t *testing.T) {
 		t.Fatalf("want failure naming command and message, got %v", err)
 	}
 
+	// The three prompts run the plan's three steps; drain each turn's events before the
+	// next prompt, as RunSession does between prompts.
+	if err := p.Prompt(ctx, "hi"); err != nil {
+		t.Fatal(err)
+	}
+	var updates int
+	for e := range p.Events() {
+		if e.Type == "message_update" {
+			updates++
+		}
+		if _, ok := DecodePromptResult(e); ok {
+			break
+		}
+	}
 	if err := p.Prompt(ctx, "hi"); err != nil {
 		t.Fatal(err)
 	}
 	var (
-		updates int
-		start   ToolStart
-		end     ToolEnd
-		result  PromptResult
+		start  ToolStart
+		end    ToolEnd
+		result PromptResult
 	)
+	// The goal turn's own prompt_result is consumed too; the retry turn supplies the
+	// error result the old protocol fixture asserted.
 	for e := range p.Events() {
 		if e.Type == "response" {
 			t.Fatalf("response leaked into events: %s", e.Raw)
-		}
-		if e.Type == "message_update" {
-			updates++
 		}
 		if v, ok := DecodeToolStart(e); ok {
 			start = v
@@ -126,19 +141,27 @@ func TestCallAndEvents(t *testing.T) {
 		}
 		if v, ok := DecodePromptResult(e); ok {
 			result = v
-			break
+			if v.Status == "error" {
+				break
+			}
+			if err := p.Prompt(ctx, "hi"); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	if updates != 500 {
 		t.Fatalf("updates = %d", updates)
 	}
-	if start.ToolCallID != "t1" || start.ToolName != "pm_return_facts" || string(start.Args) != `{"facts":"main.go:15"}` {
+	if start.ToolName != "pm_return_facts" || string(start.Args) != `{"facts":"main.go:15"}` {
 		t.Fatalf("start = %+v", start)
 	}
-	if end.ToolCallID != "t1" || end.IsError || len(end.Result.Content) != 1 || end.Result.Content[0].Text != "recorded" {
+	if start.ToolCallID != end.ToolCallID || end.IsError {
 		t.Fatalf("end = %+v", end)
 	}
-	if result.Status != "error" || result.Error == nil || !result.Error.Retryable || result.Error.Message != "429 rate limited" {
+	if len(end.Result.Content) != 1 || end.Result.Content[0].Text != "recorded" {
+		t.Fatalf("end = %+v", end)
+	}
+	if result.Status != "error" || result.Error == nil || !result.Error.Retryable || result.Error.Message != "429 slow down" {
 		t.Fatalf("result = %+v", result)
 	}
 

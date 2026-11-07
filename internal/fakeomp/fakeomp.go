@@ -2,7 +2,9 @@
 // environment variables (pm-guardians#20):
 //
 //	FAKE_OMP_PLAN      comma-separated steps goal/text/retry/fatal/loop/stall/die; the last repeats
-//	FAKE_OMP_GOAL      goal tool name; default: the first entry of the comma list PM_GOAL_TOOLS
+//	FAKE_OMP_GOAL      goal tool name; default: the first entry of the comma list the starting
+//	                   program hands its plugin, PM_GOAL_TOOL (pm-guardians) or PM_GOAL_TOOLS
+//	                   (pm-council)
 //	FAKE_OMP_ARGS      path of a JSON file with the goal tool's arguments
 //	FAKE_OMP_DELAY_MS  delay before each step, in milliseconds
 //
@@ -180,13 +182,18 @@ func parsePlan(s string) ([]step, error) {
 	return plan, nil
 }
 
-// goalTool reads the goal tool name: FAKE_OMP_GOAL, else the first entry of the
-// PM_GOAL_TOOLS comma list, else a default that still names a goal tool.
+// goalTool reads the goal tool name: FAKE_OMP_GOAL, else the first entry of the comma
+// list the starting program hands its plugin (pm-guardians sets PM_GOAL_TOOL, pm-council
+// PM_GOAL_TOOLS; a program sets only its own), else a default that still names a goal tool.
 func goalTool() string {
 	if g := os.Getenv("FAKE_OMP_GOAL"); g != "" {
 		return g
 	}
-	for _, t := range strings.Split(os.Getenv("PM_GOAL_TOOLS"), ",") {
+	list := os.Getenv("PM_GOAL_TOOL")
+	if list == "" {
+		list = os.Getenv("PM_GOAL_TOOLS")
+	}
+	for _, t := range strings.Split(list, ",") {
 		if t = strings.TrimSpace(t); t != "" {
 			return t
 		}

@@ -386,16 +386,41 @@ export default function pmGuardians(pi: ExtensionAPI): void {
 		return projectIds;
 	};
 
-	/** Adds content (an issue node id) to the Project, or returns its existing item. */
-	async function projectItem(contentId: string): Promise<string> {
+	/** The issue's item in the Project, if it has one. */
+	async function existingItem(contentId: string): Promise<string | undefined> {
 		const p = await project();
-		const data = await graphql<{ addProjectV2ItemById: { item: { id: string } } }>(
-			`mutation($projectId: ID!, $contentId: ID!) {
-				addProjectV2ItemById(input: { projectId: $projectId, contentId: $contentId }) { item { id } }
+		const data = await graphql<{ node: { projectItems: { nodes: { id: string; project: { id: string } }[] } } | null }>(
+			`query($contentId: ID!) {
+				node(id: $contentId) { ... on Issue { projectItems(first: 50) { nodes { id project { id } } } } }
 			}`,
-			{ projectId: p.id, contentId },
+			{ contentId },
 		);
-		return data.addProjectV2ItemById.item.id;
+		return data.node?.projectItems.nodes.find(n => n.project.id === p.id)?.id;
+	}
+
+	/**
+	 * Adds content (an issue node id) to the Project, or returns its existing item. Another writer (dispatch, a Project
+	 * workflow, an interrupted run of this tool) may have added it already or add it concurrently: GitHub then rejects
+	 * the add with "Content already exists in this project", and the item is read back.
+	 */
+	async function projectItem(contentId: string): Promise<string> {
+		const found = await existingItem(contentId);
+		if (found) return found;
+		const p = await project();
+		try {
+			const data = await graphql<{ addProjectV2ItemById: { item: { id: string } } }>(
+				`mutation($projectId: ID!, $contentId: ID!) {
+					addProjectV2ItemById(input: { projectId: $projectId, contentId: $contentId }) { item { id } }
+				}`,
+				{ projectId: p.id, contentId },
+			);
+			return data.addProjectV2ItemById.item.id;
+		} catch (err) {
+			if (!String(err).includes("Content already exists in this project")) throw err;
+			const raced = await existingItem(contentId);
+			if (!raced) throw err;
+			return raced;
+		}
 	}
 
 	async function setOption(itemId: string, fieldName: string, optionName: string): Promise<void> {
@@ -537,16 +562,9 @@ export default function pmGuardians(pi: ExtensionAPI): void {
 			}
 			const newRef = parseRef(`${q.ref.repo}#${created.number}`);
 
-			// c. The dispatch link with the new number, before the marker.
-			const link = dispatchLink(launch, newRef, code.cwd);
-			if (!(created.body ?? "").includes(link)) {
-				await rest("PATCH", `repos/${q.ref.repo}/issues/${created.number}`, {
-					body: insertBeforeMarker(created.body ?? "", `[启动 dispatch](${link})`),
-				});
-				done.push("added the dispatch link");
-			}
-
-			// d. Sub-issue of the old issue's parent; Project Kind=Implementation, Status=Todo, Proposer=Guardians.
+			// c. Sub-issue of the old issue's parent; Project Kind=Implementation, Status=Todo, Proposer=Guardians. This
+			// happens before the dispatch link is published: the link is what lets dispatch start a worker, and dispatch
+			// moves Status on from there.
 			const issues = await graphql<{
 				repository: {
 					oldIssue: { id: string; parent: { id: string; url: string } | null };
@@ -576,11 +594,25 @@ export default function pmGuardians(pi: ExtensionAPI): void {
 				done.push(`${q.ref.text} has no parent issue, so the new issue has none`);
 			}
 			const f = env.fields;
+			const link = dispatchLink(launch, newRef, code.cwd);
+			const published = (created.body ?? "").includes(link);
 			const newItem = await projectItem(newIssue.id);
 			await setOption(newItem, f.kind.name, f.kind.options.implementation);
-			await setOption(newItem, f.status.name, f.status.options.todo);
+			if (!published) await setOption(newItem, f.status.name, f.status.options.todo);
 			await setOption(newItem, f.proposer.name, f.proposer.options.guardians);
-			done.push(`Project ${f.kind.name}=${f.kind.options.implementation}, ${f.status.name}=${f.status.options.todo}, ${f.proposer.name}=${f.proposer.options.guardians}`);
+			done.push(
+				published
+					? `Project ${f.kind.name}=${f.kind.options.implementation}, ${f.proposer.name}=${f.proposer.options.guardians} (${f.status.name} left to dispatch: the link was already published)`
+					: `Project ${f.kind.name}=${f.kind.options.implementation}, ${f.status.name}=${f.status.options.todo}, ${f.proposer.name}=${f.proposer.options.guardians}`,
+			);
+
+			// d. The dispatch link with the new number, before the marker: from here dispatch may start a worker.
+			if (!published) {
+				await rest("PATCH", `repos/${q.ref.repo}/issues/${created.number}`, {
+					body: insertBeforeMarker(created.body ?? "", `[启动 dispatch](${link})`),
+				});
+				done.push("added the dispatch link");
+			}
 
 			// e. The old issue: replaced marker, Status=Superseded, closed as not planned.
 			if (existing) {

@@ -14,11 +14,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oh-my-omp/pm-guardians/internal/config"
-	"github.com/oh-my-omp/pm-guardians/internal/sessions/synth"
+	"github.com/mouriya-s-lab/meerkat-guardians/internal/config"
+	"github.com/mouriya-s-lab/meerkat-guardians/internal/sessions/synth"
 )
 
-// The readers that decode every line of every file (oh-my-omp/pm-guardians@e890de1) are kept
+// The readers that decode every line of every file (mouriya-s-lab/meerkat-guardians@e890de1) are kept
 // here as the oracle: the narrowed readers must derive what they derived.
 
 type oracleEntry struct {

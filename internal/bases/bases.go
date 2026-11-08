@@ -14,9 +14,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/oh-my-omp/pm-guardians/internal/checkout"
-	"github.com/oh-my-omp/pm-guardians/internal/config"
-	"github.com/oh-my-omp/pm-guardians/internal/sessions"
+	"github.com/mouriya-s-lab/meerkat-guardians/internal/checkout"
+	"github.com/mouriya-s-lab/meerkat-guardians/internal/config"
+	"github.com/mouriya-s-lab/meerkat-guardians/internal/sessions"
 )
 
 var (

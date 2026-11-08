@@ -11,7 +11,7 @@ import (
 
 // sessionFile is the omp session file a session-dir run writes, created when omp creates
 // it: a fresh session's file appears with its first assistant message, a --fork session's
-// before the ready frame. get_state answers with the path either way (pm-guardians#26). The
+// before the ready frame. get_state answers with the path either way (meerkat-guardians#26). The
 // header follows omp's v3 form; each tool call appends the entries omp records for one
 // (assistant toolCall message, tool_execution_start, tool_execution_end, toolResult
 // message).

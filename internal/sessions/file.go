@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/oh-my-omp/pm-guardians/internal/config"
+	"github.com/mouriya-s-lab/meerkat-guardians/internal/config"
 )
 
 // Kind is the kind of a guardian session.

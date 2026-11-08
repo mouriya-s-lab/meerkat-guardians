@@ -1,4 +1,4 @@
-module github.com/oh-my-omp/pm-guardians
+module github.com/mouriya-s-lab/meerkat-guardians
 
 go 1.27.3
 

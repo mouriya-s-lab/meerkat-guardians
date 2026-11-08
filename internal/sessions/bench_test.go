@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oh-my-omp/pm-guardians/internal/config"
-	"github.com/oh-my-omp/pm-guardians/internal/sessions/synth"
+	"github.com/mouriya-s-lab/meerkat-guardians/internal/config"
+	"github.com/mouriya-s-lab/meerkat-guardians/internal/sessions/synth"
 )
 
 const benchBase = "g.o__code.m"

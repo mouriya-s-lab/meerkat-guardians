@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oh-my-omp/pm-guardians/internal/config"
-	"github.com/oh-my-omp/pm-guardians/internal/fakeomp"
+	"github.com/mouriya-s-lab/meerkat-guardians/internal/config"
+	"github.com/mouriya-s-lab/meerkat-guardians/internal/fakeomp"
 )
 
 // The test binary doubles as the omp child Run starts: with FAKE_OMP_PLAN set it writes the

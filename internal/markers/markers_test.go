@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/oh-my-omp/pm-guardians/internal/config"
+	"github.com/mouriya-s-lab/meerkat-guardians/internal/config"
 )
 
 // format appends a marker line as the plugin writes it: "\n\n<!-- pm:<kind> <compact JSON> -->".

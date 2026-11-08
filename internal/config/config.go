@@ -115,7 +115,7 @@ func (g Guardian) ToolsArg() string {
 
 // LaunchLink is the omp-dispatch launch link written into an implementation issue the plugin creates
 // with pm_replace: <base>/<owner>/<repo>/issues/<n>?spec=<{"cwd":<cwd>,"frontend":<frontend>}>. It
-// has pm-council's launchLink shape; every omp child receives it as PM_LAUNCH_LINK, in this JSON form.
+// has meerkat-council's launchLink shape; every omp child receives it as PM_LAUNCH_LINK, in this JSON form.
 type LaunchLink struct {
 	Base     string   `yaml:"base" json:"base"`
 	Frontend Frontend `yaml:"frontend" json:"frontend"`

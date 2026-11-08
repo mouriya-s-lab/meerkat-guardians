@@ -1,5 +1,5 @@
 /**
- * pm-guardians omp plugin.
+ * meerkat-guardians omp plugin.
  *
  * The guardian program starts every omp child with:
  * - PM_KIND: "base" | "proxy" | "query"
@@ -26,7 +26,7 @@ import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 
 function requiredEnv(name: string): string {
 	const value = process.env[name];
-	if (value === undefined || value === "") throw new Error(`pm-guardians plugin: ${name} is not set`);
+	if (value === undefined || value === "") throw new Error(`meerkat-guardians plugin: ${name} is not set`);
 	return value;
 }
 
@@ -65,15 +65,15 @@ interface QueryMeta {
 
 function parseRef(text: string): Ref {
 	const m = /^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)#([1-9][0-9]*)$/.exec(text);
-	if (!m) throw new Error(`pm-guardians plugin: ${JSON.stringify(text)} is not owner/name#n`);
+	if (!m) throw new Error(`meerkat-guardians plugin: ${JSON.stringify(text)} is not owner/name#n`);
 	return { owner: m[1], name: m[2], repo: `${m[1]}/${m[2]}`, number: Number(m[3]), text };
 }
 
 function parseQueryMeta(meta: unknown): QueryMeta {
-	if (typeof meta !== "object" || meta === null) throw new Error("pm-guardians plugin: PM_META is not an object");
+	if (typeof meta !== "object" || meta === null) throw new Error("meerkat-guardians plugin: PM_META is not an object");
 	const { kind, ref, ask } = meta as Record<string, unknown>;
 	if (kind !== "query" || typeof ref !== "string" || typeof ask !== "number" || !Number.isInteger(ask)) {
-		throw new Error("pm-guardians plugin: this tool needs a query session (PM_META kind=query with ref and ask)");
+		throw new Error("meerkat-guardians plugin: this tool needs a query session (PM_META kind=query with ref and ask)");
 	}
 	return { ref: parseRef(ref), ask };
 }
@@ -89,7 +89,7 @@ function parseGitHubEnv(text: string): GitHubEnv {
 		names.some(n => typeof n !== "string") ||
 		!Array.isArray(env.code)
 	) {
-		throw new Error("pm-guardians plugin: PM_GITHUB lacks pmRepo, project, fields or code");
+		throw new Error("meerkat-guardians plugin: PM_GITHUB lacks pmRepo, project, fields or code");
 	}
 	return env;
 }
@@ -104,7 +104,7 @@ function parseLaunchLink(text: string): LaunchLink {
 	const base = link?.base;
 	const kind = link?.frontend?.kind;
 	if (typeof base !== "string" || base === "" || typeof kind !== "string" || kind === "") {
-		throw new Error("pm-guardians plugin: PM_LAUNCH_LINK lacks base or frontend.kind");
+		throw new Error("meerkat-guardians plugin: PM_LAUNCH_LINK lacks base or frontend.kind");
 	}
 	return { base, frontend: { kind } };
 }
@@ -237,7 +237,7 @@ function firstParagraph(text: string): string {
 	return text.trim().split(/\r?\n\s*\r?\n/)[0].trim();
 }
 
-export default function pmGuardians(pi: ExtensionAPI): void {
+export default function meerkatGuardians(pi: ExtensionAPI): void {
 	const goalTools = new Set(
 		requiredEnv("PM_GOAL_TOOL")
 			.split(",")
@@ -273,7 +273,7 @@ export default function pmGuardians(pi: ExtensionAPI): void {
 		const argv = [...args];
 		let file: string | undefined;
 		if (body !== undefined) {
-			file = path.join(os.tmpdir(), `pm-guardians-${randomUUID()}.json`);
+			file = path.join(os.tmpdir(), `meerkat-guardians-${randomUUID()}.json`);
 			await fs.writeFile(file, JSON.stringify(body));
 			argv.push("--input", file);
 		}

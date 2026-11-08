@@ -63,7 +63,7 @@ func TestLoadExample(t *testing.T) {
 		t.Fatalf("bases = %+v", cfg.Bases)
 	}
 	b := cfg.Bases[0]
-	if b.ID != "product-opus.oh-my-omp__pm-e2e-code.futureppo-pool__minimax-m3.1-flash" || b.Branch != "main" {
+	if b.ID != "product-opus.mouriya-s-lab__meerkat-e2e-code.futureppo-pool__minimax-m3.1-flash" || b.Branch != "main" {
 		t.Fatalf("base = %+v", b)
 	}
 	g, ok := cfg.Guardian("product-opus")
@@ -103,7 +103,7 @@ func TestLoadExample(t *testing.T) {
 	if !strings.Contains(cont, "pm_return_facts") {
 		t.Fatalf("continue = %s", cont)
 	}
-	if !cfg.Repos.Readable("oh-my-omp/pm-e2e-design") || cfg.Repos.Readable("oh-my-omp/pm-e2e-agenda") {
+	if !cfg.Repos.Readable("mouriya-s-lab/meerkat-e2e-design") || cfg.Repos.Readable("mouriya-s-lab/meerkat-e2e-agenda") {
 		t.Fatal("Readable wrong")
 	}
 	if want := (LaunchLink{Base: "http://127.0.0.1:47591", Frontend: Frontend{Kind: "tern"}}); cfg.LaunchLink != want {
@@ -174,8 +174,8 @@ func TestLoadErrorsNameKeyPath(t *testing.T) {
 		},
 		{
 			"base repo not in repos.yaml",
-			map[string][2]string{"guardians/bases.yaml": {"repo: oh-my-omp/pm-e2e-design", "repo: oh-my-omp/elsewhere"}},
-			"guardians/bases.yaml: bases[1].repo: oh-my-omp/elsewhere is not listed",
+			map[string][2]string{"guardians/bases.yaml": {"repo: mouriya-s-lab/meerkat-e2e-design", "repo: mouriya-s-lab/elsewhere"}},
+			"guardians/bases.yaml: bases[1].repo: mouriya-s-lab/elsewhere is not listed",
 		},
 		{
 			"unknown template field",

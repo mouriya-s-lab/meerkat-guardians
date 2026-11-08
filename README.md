@@ -1,4 +1,4 @@
-# pm-guardians
+# meerkat-guardians
 
 Pepgent PM intent guardians: a Go daemon that keeps pre-warmed headless omp **base sessions** (one per guardian × repository × model), answers **proxy reads** and settles workers' **decision asks** from forks of them, plus the TypeScript omp plugin loaded into every guardian omp session.
 
@@ -7,16 +7,16 @@ Pepgent PM intent guardians: a Go daemon that keeps pre-warmed headless omp **ba
 - An ask (`POST /v1/asks`) starts a **query session**: a fork of the ready base for the implementation issue's repository and the ask's tier model. It ends by calling one of `pm_reply`, `pm_replace` or `pm_escalate`, which write the settlement to GitHub (contract §2 markers); the HTTP response only says the ask was accepted.
 - State lives in the omp session files under `sessionsDir` and on GitHub; the program keeps no database. When the program's run of a session fails (omp exited, a non-retryable error, the continue limit, the session timeout), it writes the reason and the moment it decided the session failed beside the session file as `<session file without .jsonl>.pm-failure.json` (`{"reason":"…","at":"<RFC 3339>"}`), so `/v1/sessions` and `/v1/bases` report them after a restart too; `/v1/sessions` uses `at` as the session's `endedAt` (a killed omp writes nothing more), and falls back to the session file's last entry for records written without `at`. At startup it rebuilds unsettled asks from GitHub: for every open issue of each `code[]` repository it reads the comments, and every `ask` marker that no `reply`, `replaced` or `escalated` marker names, and that has no running or done query session, is started as `POST /v1/asks` would start it (asks whose base is not ready are logged and wait for the next start or POST).
 
-`omprpc/` is a public Go package that `oh-my-omp/pm-council` imports: an omp RPC client (ready frame, id-correlated commands, events) and `RunSession`, the shared headless-session loop that holds a session until one of its goal tools succeeds.
+`omprpc/` is a public Go package that `mouriya-s-lab/meerkat-council` imports: an omp RPC client (ready frame, id-correlated commands, events) and `RunSession`, the shared headless-session loop that holds a session until one of its goal tools succeeds.
 
 ## fake-omp
 
-`cmd/fake-omp` is a deterministic fake omp for single-repo acceptance runs (pm-council tests, guardian sessions): point a configuration's `omp.bin` at it and the session's behaviour comes entirely from the environment, so timeouts, failures and a successful goal tool are repeatable without a real LLM session. Build it with `go build -o <path> ./cmd/fake-omp`.
+`cmd/fake-omp` is a deterministic fake omp for single-repo acceptance runs (meerkat-council tests, guardian sessions): point a configuration's `omp.bin` at it and the session's behaviour comes entirely from the environment, so timeouts, failures and a successful goal tool are repeatable without a real LLM session. Build it with `go build -o <path> ./cmd/fake-omp`.
 
 | Env | Meaning |
 |---|---|
 | `FAKE_OMP_PLAN` | comma-separated steps `goal/text/retry/fatal/loop/stall/die`, one per prompt, the last repeating; `goal` calls the goal tool, `text` completes the turn with an assistant text message and no tool call, `retry`/`fatal` end it with a retryable/non-retryable error, `loop` keeps calling a non-goal tool and never completes, `stall` acknowledges the prompt and then writes and outputs nothing until killed, `die` writes the stderr tail and exits 3 |
-| `FAKE_OMP_GOAL` | the goal tool's name; default: the first entry of the comma list the starting program hands its plugin, `PM_GOAL_TOOL` (pm-guardians) or `PM_GOAL_TOOLS` (pm-council), else `pm_return_facts` |
+| `FAKE_OMP_GOAL` | the goal tool's name; default: the first entry of the comma list the starting program hands its plugin, `PM_GOAL_TOOL` (meerkat-guardians) or `PM_GOAL_TOOLS` (meerkat-council), else `pm_return_facts` |
 | `FAKE_OMP_ARGS` | path of a JSON file whose object becomes the goal tool's arguments; default `{"facts": <prompt text>}` |
 | `FAKE_OMP_DELAY_MS` | delay before each step, in milliseconds |
 
@@ -30,10 +30,10 @@ The program and the plugin read GitHub with the token in `GH_TOKEN`; the program
 
 ```sh
 export GH_TOKEN=$(gh auth token)
-mkdir -p /Users/mouriya/Ext/work/pm-guardians-local
-cp -R config.example /Users/mouriya/Ext/work/pm-guardians-local/config   # then edit paths if needed
-scripts/prepare-omp-dir.sh /Users/mouriya/Ext/work/pm-guardians-local/config
-go run ./cmd/pm-guardians --config-root /Users/mouriya/Ext/work/pm-guardians-local/config
+mkdir -p /Users/mouriya/Ext/work/meerkat-guardians-local
+cp -R config.example /Users/mouriya/Ext/work/meerkat-guardians-local/config   # then edit paths if needed
+scripts/prepare-omp-dir.sh /Users/mouriya/Ext/work/meerkat-guardians-local/config
+go run ./cmd/meerkat-guardians --config-root /Users/mouriya/Ext/work/meerkat-guardians-local/config
 ```
 
 ```sh
@@ -111,7 +111,7 @@ A query session's `PM_META` is `{kind:"query", ref, ask, base, model, tier, fing
 | `sessionTimeoutSeconds` | seconds any omp session (base, proxy, query) may run, from starting omp to its goal tool, before it is killed and fails with `session timeout after <N>s` |
 | `maxConcurrentWarmups` | warm runs at once |
 
-`guardians/guardians.yaml`: `guardians[]` with `id` (`[a-z0-9-]+`), `description`, `prompt` (system prompt file), `tools` (built-in tools kept); `launchLink` with `base` (an `http://` or `https://` URL) and `frontend.kind` (non-empty): the omp-dispatch launch link `pm_replace` writes into the issue it creates, handed to every omp child as `PM_LAUNCH_LINK`. It has the shape of pm-council's `council/council.yaml` `launchLink`; both point at the same dispatch.
+`guardians/guardians.yaml`: `guardians[]` with `id` (`[a-z0-9-]+`), `description`, `prompt` (system prompt file), `tools` (built-in tools kept); `launchLink` with `base` (an `http://` or `https://` URL) and `frontend.kind` (non-empty): the omp-dispatch launch link `pm_replace` writes into the issue it creates, handed to every omp child as `PM_LAUNCH_LINK`. It has the shape of meerkat-council's `council/council.yaml` `launchLink`; both point at the same dispatch.
 
 `guardians/bases.yaml`: `bases[]` with `guardian`, `repo` (`owner/name`, listed in `shared/repos.yaml` code, design or omp), `branch`, `models[]`, optional `focus` (in the base opening message). One base per (guardian, repo, model); base id `<guardian>.<owner>__<name>.<model with "/" → "__" and ":" → "_">`.
 

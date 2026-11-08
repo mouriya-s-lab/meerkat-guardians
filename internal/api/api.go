@@ -13,11 +13,11 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/oh-my-omp/pm-guardians/internal/asks"
-	"github.com/oh-my-omp/pm-guardians/internal/bases"
-	"github.com/oh-my-omp/pm-guardians/internal/config"
-	"github.com/oh-my-omp/pm-guardians/internal/proxy"
-	"github.com/oh-my-omp/pm-guardians/internal/sessions"
+	"github.com/mouriya-s-lab/meerkat-guardians/internal/asks"
+	"github.com/mouriya-s-lab/meerkat-guardians/internal/bases"
+	"github.com/mouriya-s-lab/meerkat-guardians/internal/config"
+	"github.com/mouriya-s-lab/meerkat-guardians/internal/proxy"
+	"github.com/mouriya-s-lab/meerkat-guardians/internal/sessions"
 )
 
 type Server struct {

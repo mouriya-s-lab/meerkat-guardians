@@ -11,7 +11,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/oh-my-omp/pm-guardians/internal/config"
+	"github.com/mouriya-s-lab/meerkat-guardians/internal/config"
 )
 
 // Marker is one of Ask, Reply, Replaced, Escalated.

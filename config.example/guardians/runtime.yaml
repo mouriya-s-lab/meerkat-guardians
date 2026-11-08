@@ -1,10 +1,10 @@
 listen: 127.0.0.1:7410
-sessionsDir: /Users/mouriya/Ext/work/pm-guardians-local/sessions
-checkoutsDir: /Users/mouriya/Ext/work/pm-guardians-local/checkouts
+sessionsDir: /Users/mouriya/Ext/work/meerkat-guardians-local/sessions
+checkoutsDir: /Users/mouriya/Ext/work/meerkat-guardians-local/checkouts
 omp:
   bin: omp
-  agentDir: /Users/mouriya/Ext/work/pm-guardians-local/omp
-  extension: /Users/mouriya/Ext/code/omomp/pm-guardians/plugin/index.ts
+  agentDir: /Users/mouriya/Ext/work/meerkat-guardians-local/omp
+  extension: /Users/mouriya/Ext/code/meerkat-guardians/plugin/index.ts
   readyTimeoutSeconds: 120
   exitGraceSeconds: 30
 maxContinuePrompts: 50

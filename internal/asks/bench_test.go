@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oh-my-omp/pm-guardians/internal/bases"
-	"github.com/oh-my-omp/pm-guardians/internal/checkout"
-	"github.com/oh-my-omp/pm-guardians/internal/config"
-	"github.com/oh-my-omp/pm-guardians/internal/sessions"
-	"github.com/oh-my-omp/pm-guardians/internal/sessions/synth"
+	"github.com/mouriya-s-lab/meerkat-guardians/internal/bases"
+	"github.com/mouriya-s-lab/meerkat-guardians/internal/checkout"
+	"github.com/mouriya-s-lab/meerkat-guardians/internal/config"
+	"github.com/mouriya-s-lab/meerkat-guardians/internal/sessions"
+	"github.com/mouriya-s-lab/meerkat-guardians/internal/sessions/synth"
 )
 
 // BenchmarkClaim claims an ask no query session file holds, over query directories of two sizes

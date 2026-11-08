@@ -11,7 +11,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/oh-my-omp/pm-guardians/internal/sessions/synth"
+	"github.com/mouriya-s-lab/meerkat-guardians/internal/sessions/synth"
 )
 
 func main() {

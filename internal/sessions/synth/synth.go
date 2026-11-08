@@ -59,7 +59,7 @@ func WriteDir(root string, l Layout) (Written, error) {
 	w.Ready = ready.id
 	for i := range l.N {
 		s := session{kind: "query", id: fmt.Sprintf("0c%06d-0000-7000-8000-000000000000", i), started: next(), parent: &ready}
-		s.meta = l.meta(map[string]any{"kind": "query", "ref": "oh-my-omp/pm-e2e-code#1", "ask": l.AskFrom + int64(i), "tier": "simple"})
+		s.meta = l.meta(map[string]any{"kind": "query", "ref": "mouriya-s-lab/meerkat-e2e-code#1", "ask": l.AskFrom + int64(i), "tier": "simple"})
 		if i%2 == 0 {
 			s.goal = "pm_reply"
 		}
@@ -70,7 +70,7 @@ func WriteDir(root string, l Layout) (Written, error) {
 	}
 	for i := range l.N {
 		s := session{kind: "proxy", id: fmt.Sprintf("0d%06d-0000-7000-8000-000000000000", i), started: next(), parent: &ready}
-		s.meta = l.meta(map[string]any{"kind": "proxy", "ref": "oh-my-omp/pm-e2e-agenda#1", "seat": "ClaudeHigh"})
+		s.meta = l.meta(map[string]any{"kind": "proxy", "ref": "mouriya-s-lab/meerkat-e2e-agenda#1", "seat": "ClaudeHigh"})
 		if i%2 == 0 {
 			s.goal = "pm_return_facts"
 		}

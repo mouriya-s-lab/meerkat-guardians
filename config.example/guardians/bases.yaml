@@ -1,10 +1,10 @@
 bases:
   - guardian: product-opus
-    repo: oh-my-omp/pm-e2e-code
+    repo: mouriya-s-lab/meerkat-e2e-code
     branch: main
     models: [futureppo-pool/minimax-m3.1-flash]
     focus: 入口文件、命令行参数与数据存储的位置
   - guardian: product-opus
-    repo: oh-my-omp/pm-e2e-design
+    repo: mouriya-s-lab/meerkat-e2e-design
     branch: main
     models: [futureppo-pool/minimax-m3.1-flash]

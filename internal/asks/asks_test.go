@@ -8,10 +8,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/oh-my-omp/pm-guardians/internal/bases"
-	"github.com/oh-my-omp/pm-guardians/internal/checkout"
-	"github.com/oh-my-omp/pm-guardians/internal/config"
-	"github.com/oh-my-omp/pm-guardians/internal/sessions"
+	"github.com/mouriya-s-lab/meerkat-guardians/internal/bases"
+	"github.com/mouriya-s-lab/meerkat-guardians/internal/checkout"
+	"github.com/mouriya-s-lab/meerkat-guardians/internal/config"
+	"github.com/mouriya-s-lab/meerkat-guardians/internal/sessions"
 )
 
 const header = `{"type":"session","version":3,"id":"%s","timestamp":"2026-11-07T01:00:00.000Z","cwd":"/c"}`
@@ -92,7 +92,7 @@ func TestSubmitValidation(t *testing.T) {
 		{"missing question", with(func(q *Request) { q.Question = " " }), Invalid, true, 0},
 		{"missing tier", with(func(q *Request) { q.Tier = "" }), Invalid, true, 0},
 		{"unknown tier", with(func(q *Request) { q.Tier = "urgent" }), Invalid, true, 0},
-		{"repo not in repos.yaml", with(func(q *Request) { q.Issue = "oh-my-omp/nope#1" }), UnknownRepo, true, 0},
+		{"repo not in repos.yaml", with(func(q *Request) { q.Issue = "mouriya-s-lab/nope#1" }), UnknownRepo, true, 0},
 		{"code repo without route", with(func(q *Request) { q.Issue = "o/unrouted#1" }), UnknownRepo, true, 0},
 		{"tier model without ready base", with(func(q *Request) { q.Tier = "complex" }), BaseNotReady, true, 0},
 		{"done session for comment", valid, 0, false, Exists},

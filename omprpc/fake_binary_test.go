@@ -13,11 +13,11 @@ import (
 	"time"
 )
 
-// TestFakeOmpBinary drives the built cmd/fake-omp the way pm-council will: through
+// TestFakeOmpBinary drives the built cmd/fake-omp the way meerkat-council will: through
 // RunSession with the FAKE_OMP_* environment deciding the plan (acceptance rows 1–3).
 func TestFakeOmpBinary(t *testing.T) {
 	bin := filepath.Join(t.TempDir(), "fake-omp")
-	if out, err := exec.Command("go", "build", "-o", bin, "github.com/oh-my-omp/pm-guardians/cmd/fake-omp").CombinedOutput(); err != nil {
+	if out, err := exec.Command("go", "build", "-o", bin, "github.com/mouriya-s-lab/meerkat-guardians/cmd/fake-omp").CombinedOutput(); err != nil {
 		t.Fatalf("go build ./cmd/fake-omp: %v: %s", err, out)
 	}
 
@@ -158,7 +158,7 @@ func TestFakeOmpBinary(t *testing.T) {
 	})
 
 	// stall stops the turn before its first assistant message, so the session never gets a
-	// file: the failed session without one that the session lists must show (pm-guardians#26).
+	// file: the failed session without one that the session lists must show (meerkat-guardians#26).
 	t.Run("stall", func(t *testing.T) {
 		sessDir := t.TempDir()
 		s := spec(sessDir, []string{"FAKE_OMP_PLAN=stall"}, 2*time.Second)

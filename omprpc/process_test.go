@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oh-my-omp/pm-guardians/internal/fakeomp"
+	"github.com/mouriya-s-lab/meerkat-guardians/internal/fakeomp"
 )
 
 // The test binary doubles as a fake omp: every FAKE_OMP_PLAN set runs fakeomp on stdio, so

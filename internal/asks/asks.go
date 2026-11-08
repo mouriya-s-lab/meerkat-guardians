@@ -16,12 +16,12 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/oh-my-omp/pm-guardians/internal/bases"
-	"github.com/oh-my-omp/pm-guardians/internal/checkout"
-	"github.com/oh-my-omp/pm-guardians/internal/config"
-	"github.com/oh-my-omp/pm-guardians/internal/github"
-	"github.com/oh-my-omp/pm-guardians/internal/markers"
-	"github.com/oh-my-omp/pm-guardians/internal/sessions"
+	"github.com/mouriya-s-lab/meerkat-guardians/internal/bases"
+	"github.com/mouriya-s-lab/meerkat-guardians/internal/checkout"
+	"github.com/mouriya-s-lab/meerkat-guardians/internal/config"
+	"github.com/mouriya-s-lab/meerkat-guardians/internal/github"
+	"github.com/mouriya-s-lab/meerkat-guardians/internal/markers"
+	"github.com/mouriya-s-lab/meerkat-guardians/internal/sessions"
 )
 
 // Request is the body of POST /v1/asks.

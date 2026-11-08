@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oh-my-omp/pm-guardians/internal/config"
+	"github.com/mouriya-s-lab/meerkat-guardians/internal/config"
 )
 
 // testdata/base.jsonl and testdata/proxy.jsonl are real omp 18.17 session files written by a

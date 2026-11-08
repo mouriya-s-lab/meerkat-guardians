@@ -1,4 +1,4 @@
-// Command pm-guardians serves proxy reads and decision asks from forks of pre-warmed headless omp
+// Command meerkat-guardians serves proxy reads and decision asks from forks of pre-warmed headless omp
 // base sessions.
 package main
 
@@ -12,25 +12,25 @@ import (
 	"os"
 	"time"
 
-	"github.com/oh-my-omp/pm-guardians/internal/api"
-	"github.com/oh-my-omp/pm-guardians/internal/asks"
-	"github.com/oh-my-omp/pm-guardians/internal/bases"
-	"github.com/oh-my-omp/pm-guardians/internal/checkout"
-	"github.com/oh-my-omp/pm-guardians/internal/config"
-	"github.com/oh-my-omp/pm-guardians/internal/github"
-	"github.com/oh-my-omp/pm-guardians/internal/proxy"
-	"github.com/oh-my-omp/pm-guardians/internal/sessions"
+	"github.com/mouriya-s-lab/meerkat-guardians/internal/api"
+	"github.com/mouriya-s-lab/meerkat-guardians/internal/asks"
+	"github.com/mouriya-s-lab/meerkat-guardians/internal/bases"
+	"github.com/mouriya-s-lab/meerkat-guardians/internal/checkout"
+	"github.com/mouriya-s-lab/meerkat-guardians/internal/config"
+	"github.com/mouriya-s-lab/meerkat-guardians/internal/github"
+	"github.com/mouriya-s-lab/meerkat-guardians/internal/proxy"
+	"github.com/mouriya-s-lab/meerkat-guardians/internal/sessions"
 )
 
 func main() {
 	root := flag.String("config-root", "", "directory holding guardians/ and shared/ (required)")
 	flag.Parse()
 	if *root == "" {
-		fmt.Fprintln(os.Stderr, "pm-guardians: --config-root is required")
+		fmt.Fprintln(os.Stderr, "meerkat-guardians: --config-root is required")
 		os.Exit(2)
 	}
 	if err := run(*root); err != nil {
-		fmt.Fprintln(os.Stderr, "pm-guardians:", err)
+		fmt.Fprintln(os.Stderr, "meerkat-guardians:", err)
 		os.Exit(1)
 	}
 }

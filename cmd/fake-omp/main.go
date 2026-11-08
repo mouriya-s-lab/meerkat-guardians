@@ -1,5 +1,5 @@
 // Command fake-omp is a deterministic fake omp for the single-repo acceptance runs of the
-// PM council and guardians (pm-guardians#20): it speaks the omp RPC protocol on stdio, and
+// PM council and guardians (meerkat-guardians#20): it speaks the omp RPC protocol on stdio, and
 // the council and guardians point runtime.yaml's omp.executable at it to exercise
 // timeouts, failures and successful goal tools without a real multi-seat LLM session.
 //
@@ -11,7 +11,7 @@ package main
 import (
 	"os"
 
-	"github.com/oh-my-omp/pm-guardians/internal/fakeomp"
+	"github.com/mouriya-s-lab/meerkat-guardians/internal/fakeomp"
 )
 
 func main() {

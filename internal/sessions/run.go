@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/oh-my-omp/pm-guardians/internal/config"
-	"github.com/oh-my-omp/pm-guardians/omprpc"
+	"github.com/mouriya-s-lab/meerkat-guardians/internal/config"
+	"github.com/mouriya-s-lab/meerkat-guardians/omprpc"
 )
 
 // Spec is one omp session to run until one of its goal tools succeeds.

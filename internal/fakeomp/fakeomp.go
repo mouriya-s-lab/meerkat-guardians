@@ -1,10 +1,10 @@
 // Package fakeomp speaks the omp RPC protocol as a deterministic fake omp, driven by
-// environment variables (pm-guardians#20):
+// environment variables (meerkat-guardians#20):
 //
 //	FAKE_OMP_PLAN      comma-separated steps goal/text/retry/fatal/loop/stall/die; the last repeats
 //	FAKE_OMP_GOAL      goal tool name; default: the first entry of the comma list the starting
-//	                   program hands its plugin, PM_GOAL_TOOL (pm-guardians) or PM_GOAL_TOOLS
-//	                   (pm-council)
+//	                   program hands its plugin, PM_GOAL_TOOL (meerkat-guardians) or PM_GOAL_TOOLS
+//	                   (meerkat-council)
 //	FAKE_OMP_ARGS      path of a JSON file with the goal tool's arguments
 //	FAKE_OMP_DELAY_MS  delay before each step, in milliseconds
 //
@@ -15,13 +15,13 @@
 // acknowledges the prompt, then writes nothing and outputs nothing until killed; die writes
 // stderr and exits 3.
 //
-// The session file follows omp's timing (pm-guardians#26): a fresh session's file is created
+// The session file follows omp's timing (meerkat-guardians#26): a fresh session's file is created
 // with its first assistant message, so a session that stalls or fails before one has none;
 // --fork <source> creates it before the ready frame, its header's parentSession the source
 // header's id (the source's entries are not copied).
 //
 // PM_META, when set, is written as the session's pm-meta custom entry right after the
-// header, as the council plugin does at session start (pm-guardians#22); a PM_META that is
+// header, as the council plugin does at session start (meerkat-guardians#22); a PM_META that is
 // not JSON fails the run before the ready frame.
 //
 // The omprpc test binary (TestMain) and cmd/fake-omp both call Main; there is no second
@@ -183,7 +183,7 @@ func parsePlan(s string) ([]step, error) {
 }
 
 // goalTool reads the goal tool name: FAKE_OMP_GOAL, else the first entry of the comma
-// list the starting program hands its plugin (pm-guardians sets PM_GOAL_TOOL, pm-council
+// list the starting program hands its plugin (meerkat-guardians sets PM_GOAL_TOOL, meerkat-council
 // PM_GOAL_TOOLS; a program sets only its own), else a default that still names a goal tool.
 func goalTool() string {
 	if g := os.Getenv("FAKE_OMP_GOAL"); g != "" {

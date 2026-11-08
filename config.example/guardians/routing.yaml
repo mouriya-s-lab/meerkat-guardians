@@ -1,7 +1,7 @@
 routes:
-  - repo: oh-my-omp/pm-e2e-code
+  - repo: mouriya-s-lab/meerkat-e2e-code
     guardian: product-opus
     tiers: { simple: futureppo-pool/minimax-m3.1-flash, complex: futureppo-pool/minimax-m3.1-flash }
-  - repo: oh-my-omp/pm-e2e-design
+  - repo: mouriya-s-lab/meerkat-e2e-design
     guardian: product-opus
     tiers: { simple: futureppo-pool/minimax-m3.1-flash, complex: futureppo-pool/minimax-m3.1-flash }

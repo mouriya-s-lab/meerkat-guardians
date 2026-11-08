@@ -23,9 +23,9 @@ import (
 	"github.com/goccy/go-yaml/token"
 )
 
-// PMTools are the tools the plugin registers. Every guardian omp child, whatever its kind, lists
-// all of them after the guardian's tools, so bases and their forks share one tool set (contract §6).
-var PMTools = []string{"pm_base_ready", "pm_return_facts", "pm_reply", "pm_replace", "pm_escalate"}
+// MeerkatTools are the tools the plugin registers. Every guardian omp child, whatever its kind, lists
+// all of them after the guardian's tools, so bases and their forks share one tool set.
+var MeerkatTools = []string{"meerkat_base_ready", "meerkat_return_facts", "meerkat_reply", "meerkat_replace", "meerkat_escalate"}
 
 // Config is the validated configuration. All paths are absolute. Root is the configuration root that
 // relative file references resolve against; Manifest records what was read under it.
@@ -110,12 +110,12 @@ type Guardian struct {
 
 // ToolsArg is the --tools value shared by a guardian's bases and every fork of them.
 func (g Guardian) ToolsArg() string {
-	return strings.Join(append(append([]string(nil), g.Tools...), PMTools...), ",")
+	return strings.Join(append(append([]string(nil), g.Tools...), MeerkatTools...), ",")
 }
 
 // LaunchLink is the omp-dispatch launch link written into an implementation issue the plugin creates
-// with pm_replace: <base>/<owner>/<repo>/issues/<n>?spec=<{"cwd":<cwd>,"frontend":<frontend>}>. It
-// has meerkat-council's launchLink shape; every omp child receives it as PM_LAUNCH_LINK, in this JSON form.
+// with meerkat_replace: <base>/<owner>/<repo>/issues/<n>?spec=<{"cwd":<cwd>,"frontend":<frontend>}>. It
+// has meerkat-council's launchLink shape; every omp child receives it as MEERKAT_LAUNCH_LINK, in this JSON form.
 type LaunchLink struct {
 	Base     string   `yaml:"base" json:"base"`
 	Frontend Frontend `yaml:"frontend" json:"frontend"`
@@ -153,7 +153,7 @@ type Tiers struct {
 	Complex string `yaml:"complex"`
 }
 
-// Tier is the tier of an ask (contract §2 `ask.tier`).
+// Tier is the tier of an ask (`ask.tier` of the ask marker).
 type Tier string
 
 const (
@@ -223,13 +223,13 @@ func (g Goal) Render(vars any) (opening, cont string, err error) {
 }
 
 type Repos struct {
-	PM     PMRepo     `yaml:"pm"`
+	Agenda AgendaRepo `yaml:"agenda"`
 	Code   []CodeRepo `yaml:"code"`
 	Design []string   `yaml:"design"`
 	OMP    []string   `yaml:"omp"`
 }
 
-type PMRepo struct {
+type AgendaRepo struct {
 	Repo    string  `yaml:"repo"`
 	Project Project `yaml:"project"`
 }
@@ -254,8 +254,8 @@ func (r Repos) CodeRepo(repo string) (CodeRepo, bool) {
 	return CodeRepo{}, false
 }
 
-// ProjectConfig is shared/project.yaml: the Project field and option names (appendix B). The json
-// tags equal the yaml keys, so the plugin receives the same shape in PM_GITHUB.
+// ProjectConfig is shared/project.yaml: the Project field and option names. The json
+// tags equal the yaml keys, so the plugin receives the same shape in MEERKAT_GITHUB.
 type ProjectConfig struct {
 	Fields ProjectFields `yaml:"fields" json:"fields"`
 }
@@ -455,9 +455,9 @@ func load(fsys fs.FS, root string) (*Config, []Violation) {
 	// shared/repos.yaml
 	{
 		f := v.file("shared/repos.yaml")
-		f.repo("pm.repo", rep.PM.Repo)
-		f.str("pm.project.owner", rep.PM.Project.Owner)
-		f.positive("pm.project.number", rep.PM.Project.Number)
+		f.repo("agenda.repo", rep.Agenda.Repo)
+		f.str("agenda.project.owner", rep.Agenda.Project.Owner)
+		f.positive("agenda.project.number", rep.Agenda.Project.Number)
 		f.present("code", rep.Code != nil)
 		for i, c := range rep.Code {
 			f.repo(fmt.Sprintf("code[%d].repo", i), c.Repo)
@@ -715,8 +715,8 @@ func rootRel(root, abs string) (string, bool) {
 func (f fileValidator) goal(path string, g *Goal, sample any) {
 	f.nonEmpty(path+".tools", len(g.Tools))
 	for i, t := range g.Tools {
-		if f.str(fmt.Sprintf("%s.tools[%d]", path, i), t) && !slices.Contains(PMTools, t) {
-			f.errorf(fmt.Sprintf("%s.tools[%d]", path, i), "%q is not a plugin tool (%s)", t, strings.Join(PMTools, ", "))
+		if f.str(fmt.Sprintf("%s.tools[%d]", path, i), t) && !slices.Contains(MeerkatTools, t) {
+			f.errorf(fmt.Sprintf("%s.tools[%d]", path, i), "%q is not a plugin tool (%s)", t, strings.Join(MeerkatTools, ", "))
 		}
 	}
 	for _, t := range []struct {

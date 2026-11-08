@@ -1,7 +1,7 @@
-// Package asks accepts decision asks (contract §3 POST /v1/asks) and runs one query session per
+// Package asks accepts decision asks (POST /v1/asks) and runs one query session per
 // ask: a fork of the ready base for (route guardian, repo, tier model) that settles the ask on
 // GitHub through one of the plugin's tools. It also rebuilds unsettled asks from GitHub at
-// startup (contract §1).
+// startup.
 package asks
 
 import (
@@ -103,30 +103,30 @@ type Runner struct {
 	bases     *bases.Manager
 	co        *checkout.Manager
 	gh        *github.Client
-	githubEnv string // PM_GITHUB=<json>
+	githubEnv string // MEERKAT_GITHUB=<json>
 
 	mu     sync.Mutex
 	active map[int64]bool
 }
 
-// githubEnv is the PM_GITHUB value the plugin's GitHub tools read.
+// githubEnv is the MEERKAT_GITHUB value the plugin's GitHub tools read.
 type githubEnv struct {
-	PMRepo  string               `json:"pmRepo"`
-	Project config.Project       `json:"project"`
-	Fields  config.ProjectFields `json:"fields"`
-	Code    []config.CodeRepo    `json:"code"`
+	AgendaRepo string               `json:"agendaRepo"`
+	Project    config.Project       `json:"project"`
+	Fields     config.ProjectFields `json:"fields"`
+	Code       []config.CodeRepo    `json:"code"`
 }
 
 func New(cfg *config.Config, reg *sessions.Registry, b *bases.Manager, co *checkout.Manager, gh *github.Client) (*Runner, error) {
 	env, err := json.Marshal(githubEnv{
-		PMRepo: cfg.Repos.PM.Repo, Project: cfg.Repos.PM.Project, Fields: cfg.Project.Fields, Code: cfg.Repos.Code,
+		AgendaRepo: cfg.Repos.Agenda.Repo, Project: cfg.Repos.Agenda.Project, Fields: cfg.Project.Fields, Code: cfg.Repos.Code,
 	})
 	if err != nil {
 		return nil, err
 	}
 	return &Runner{
 		cfg: cfg, reg: reg, bases: b, co: co, gh: gh,
-		githubEnv: "PM_GITHUB=" + string(env),
+		githubEnv: "MEERKAT_GITHUB=" + string(env),
 		active:    map[int64]bool{},
 	}, nil
 }

@@ -17,8 +17,8 @@ import (
 )
 
 func TestCompare(t *testing.T) {
-	rec := &sessions.Fingerprint{Model: "m1", PromptSha256: "p1", Tools: "read,pm_base_ready,pm_return_facts", OMPSettingsSha256: "s1", Commit: "1a2b3c4d5e"}
-	same := sessions.Fingerprint{Model: "m1", PromptSha256: "p1", Tools: "read,pm_base_ready,pm_return_facts", OMPSettingsSha256: "s1"}
+	rec := &sessions.Fingerprint{Model: "m1", PromptSha256: "p1", Tools: "read,meerkat_base_ready,meerkat_return_facts", OMPSettingsSha256: "s1", Commit: "1a2b3c4d5e"}
+	same := sessions.Fingerprint{Model: "m1", PromptSha256: "p1", Tools: "read,meerkat_base_ready,meerkat_return_facts", OMPSettingsSha256: "s1"}
 	cases := []struct {
 		name       string
 		rec        *sessions.Fingerprint
@@ -31,9 +31,9 @@ func TestCompare(t *testing.T) {
 		{"unchanged", rec, same, "1a2b3c4d5e", nil, false, ""},
 		{"branch moved", rec, same, "5d6e7f8a9b", nil, true, "branch main moved 1a2b3c4 -> 5d6e7f8"},
 		{"tools changed and branch moved", rec,
-			sessions.Fingerprint{Model: "m1", PromptSha256: "p1", Tools: "read,grep,pm_base_ready,pm_return_facts", OMPSettingsSha256: "s1"},
+			sessions.Fingerprint{Model: "m1", PromptSha256: "p1", Tools: "read,grep,meerkat_base_ready,meerkat_return_facts", OMPSettingsSha256: "s1"},
 			"5d6e7f8a9b", nil, true,
-			"tools changed read,pm_base_ready,pm_return_facts -> read,grep,pm_base_ready,pm_return_facts; branch main moved 1a2b3c4 -> 5d6e7f8"},
+			"tools changed read,meerkat_base_ready,meerkat_return_facts -> read,grep,meerkat_base_ready,meerkat_return_facts; branch main moved 1a2b3c4 -> 5d6e7f8"},
 		{"prompt changed", rec, sessions.Fingerprint{Model: "m1", PromptSha256: "p2", Tools: same.Tools, OMPSettingsSha256: "s1"}, "1a2b3c4d5e", nil, true, "system prompt changed"},
 		{"model changed", rec, sessions.Fingerprint{Model: "m2", PromptSha256: "p1", Tools: same.Tools, OMPSettingsSha256: "s1"}, "1a2b3c4d5e", nil, true, "model changed m1 -> m2"},
 		{"omp settings changed", rec, sessions.Fingerprint{Model: "m1", PromptSha256: "p1", Tools: same.Tools, OMPSettingsSha256: "s2"}, "1a2b3c4d5e", nil, true, "omp settings changed"},
@@ -57,7 +57,7 @@ func TestCompare(t *testing.T) {
 
 // TestOMPSettingsFingerprint follows a base through warm, restart, a settings change and a
 // rewarm: the fingerprint a warm run records (currentFingerprint plus the commit, stored as JSON
-// in the pm-meta entry) is compared with currentFingerprint over a temporary agent dir.
+// in the meerkat-meta entry) is compared with currentFingerprint over a temporary agent dir.
 func TestOMPSettingsFingerprint(t *testing.T) {
 	dir := t.TempDir()
 	agentDir := filepath.Join(dir, "omp")
@@ -173,13 +173,13 @@ func newTestManager(t *testing.T, root string) *Manager {
 		Runtime:   config.Runtime{SessionsDir: filepath.Join(root, "sessions"), MaxConcurrentWarmups: 1, OMP: config.OMP{AgentDir: agentDir}},
 		Guardians: []config.Guardian{{ID: "g", Prompt: prompt}},
 		Bases:     []config.Base{{ID: testBase, Guardian: "g", Repo: "o/r", Branch: "main", Model: "m"}},
-		Goals:     config.Goals{Base: config.Goal{Tools: []string{"pm_base_ready"}}},
+		Goals:     config.Goals{Base: config.Goal{Tools: []string{"meerkat_base_ready"}}},
 	}
 	return New(cfg, sessions.NewRegistry(config.LaunchLink{}), checkout.New(filepath.Join(root, "checkouts")))
 }
 
 // writeSession writes a base session file started at started; readyAt, when non-zero, is the
-// time of its successful pm_base_ready result.
+// time of its successful meerkat_base_ready result.
 func writeSession(t *testing.T, m *Manager, id string, started, readyAt time.Time) string {
 	t.Helper()
 	dir := m.Dir(testBase)
@@ -188,9 +188,9 @@ func writeSession(t *testing.T, m *Manager, id string, started, readyAt time.Tim
 	}
 	ts := func(at time.Time) string { return at.UTC().Format(time.RFC3339Nano) }
 	body := fmt.Sprintf(`{"type":"session","version":3,"id":%q,"timestamp":%q,"cwd":"/c"}`+"\n", id, ts(started)) +
-		fmt.Sprintf(`{"type":"custom","customType":"pm-meta","data":{"kind":"base","base":%q,"model":"m"},"id":"x","timestamp":%q}`+"\n", testBase, ts(started.Add(time.Second)))
+		fmt.Sprintf(`{"type":"custom","customType":"meerkat-meta","data":{"kind":"base","base":%q,"model":"m"},"id":"x","timestamp":%q}`+"\n", testBase, ts(started.Add(time.Second)))
 	if !readyAt.IsZero() {
-		body += fmt.Sprintf(`{"type":"message","id":"y","timestamp":%q,"message":{"role":"toolResult","toolName":"pm_base_ready","isError":false}}`+"\n", ts(readyAt))
+		body += fmt.Sprintf(`{"type":"message","id":"y","timestamp":%q,"message":{"role":"toolResult","toolName":"meerkat_base_ready","isError":false}}`+"\n", ts(readyAt))
 	}
 	path := filepath.Join(dir, id+".jsonl")
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {

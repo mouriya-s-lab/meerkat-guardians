@@ -46,7 +46,7 @@ func (f *Failure) Error() string { return f.Reason }
 
 // Registry runs sessions and remembers, for this process lifetime, which are live. Everything
 // else about a session comes from its file and the failure record beside it. Every omp child it
-// starts receives the configured launch link as PM_LAUNCH_LINK.
+// starts receives the configured launch link as MEERKAT_LAUNCH_LINK.
 type Registry struct {
 	launchLink config.LaunchLink
 	mu         sync.Mutex
@@ -94,11 +94,11 @@ func (r *Registry) Run(ctx context.Context, s Spec) (Result, error) {
 			Dir:  s.Cwd,
 			Env: append([]string{
 				"PI_CODING_AGENT_DIR=" + s.OMP.AgentDir,
-				"PM_KIND=" + string(s.Meta.Kind),
-				"PM_GOAL_TOOL=" + strings.Join(s.GoalTools, ","),
-				"PM_CONTINUE=" + s.Continue,
-				"PM_META=" + string(meta),
-				"PM_LAUNCH_LINK=" + string(launchLink),
+				"MEERKAT_KIND=" + string(s.Meta.Kind),
+				"MEERKAT_GOAL_TOOL=" + strings.Join(s.GoalTools, ","),
+				"MEERKAT_CONTINUE=" + s.Continue,
+				"MEERKAT_META=" + string(meta),
+				"MEERKAT_LAUNCH_LINK=" + string(launchLink),
 			}, s.Env...),
 		},
 		Opening:            s.Opening,
@@ -119,7 +119,7 @@ func (r *Registry) Run(ctx context.Context, s Spec) (Result, error) {
 	// a finished failed session without its reason and end time. omp writes nothing once killed,
 	// so this moment, not the session file's last entry, is when the session ended. The record
 	// carries what Run knew from its Spec, so the session lists even when omp never wrote its
-	// file (§I).
+	// file.
 	if err != nil && sessionFile != "" {
 		rec := failureRecord{
 			Reason: err.Error(), At: time.Now().UTC(),
@@ -161,7 +161,7 @@ type Summary struct {
 
 // List derives session rows from the session files under dir, newest first, at most limit rows.
 // Only the files that make the rows are parsed; the rest are known by their header. A session
-// whose file omp never wrote lists from its failure record alone (§I).
+// whose file omp never wrote lists from its failure record alone.
 func (r *Registry) List(dir string, goalTools map[Kind][]string, limit int) ([]Summary, error) {
 	cands, err := Newest(dir)
 	if err != nil {

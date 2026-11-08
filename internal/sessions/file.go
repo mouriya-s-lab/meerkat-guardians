@@ -27,7 +27,7 @@ const (
 	KindQuery Kind = "query"
 )
 
-// Meta is the pm-meta custom entry the plugin appends from PM_META at session start.
+// Meta is the meerkat-meta custom entry the plugin appends from MEERKAT_META at session start.
 type Meta struct {
 	Kind        Kind         `json:"kind"`
 	Ref         string       `json:"ref,omitempty"`
@@ -59,7 +59,7 @@ type File struct {
 	ParentSession string
 	StartedAt     time.Time
 	LastAt        time.Time
-	Meta          *Meta                // latest pm-meta entry
+	Meta          *Meta                // latest meerkat-meta entry
 	ToolOK        map[string]time.Time // tool name -> timestamp of its latest successful tool result
 	LastError     string               // errorMessage of the latest assistant message that failed
 	Failure       string               // why the program's run of this session failed; see FailurePath
@@ -92,7 +92,7 @@ type failureRecord struct {
 // timeout). omp writes the session file and stops writing it when killed; the program owns this
 // record, so the reason and the end time outlive the process.
 func FailurePath(sessionFile string) string {
-	return strings.TrimSuffix(sessionFile, ".jsonl") + ".pm-failure.json"
+	return strings.TrimSuffix(sessionFile, ".jsonl") + ".meerkat-failure.json"
 }
 
 // writeFailure records rec for the session in sessionFile, atomically.
@@ -126,7 +126,7 @@ var ErrNotSession = errors.New("not an omp session file")
 const maxLineBytes = 64 << 20
 
 // entry is what one line is judged on. A line that does not decode into it is skipped (a line
-// being written concurrently). The data payload is not part of it: only pm-meta lines decode
+// being written concurrently). The data payload is not part of it: only meerkat-meta lines decode
 // theirs, through metaLine.
 type entry struct {
 	Type          string `json:"type"`
@@ -142,15 +142,15 @@ type entry struct {
 	} `json:"message"`
 }
 
-func (e *entry) isMeta() bool { return e.Type == "custom" && e.CustomType == "pm-meta" }
+func (e *entry) isMeta() bool { return e.Type == "custom" && e.CustomType == "meerkat-meta" }
 
-// metaLine is a pm-meta line with its payload.
+// metaLine is a meerkat-meta line with its payload.
 type metaLine struct {
 	entry
 	Data json.RawMessage `json:"data"`
 }
 
-// meta decodes the payload of pm-meta line l; ok is false when it is not a Meta.
+// meta decodes the payload of meerkat-meta line l; ok is false when it is not a Meta.
 func (l *metaLine) meta() (*Meta, bool) {
 	var m Meta
 	if json.Unmarshal(l.Data, &m) != nil {
@@ -279,8 +279,8 @@ func readHeader(path string, l *lineReader) (header, error) {
 	return scanHeader(l)
 }
 
-// readMeta reads the latest pm-meta entry of the session file at path (nil if it has none),
-// decoding only the header and the lines that carry a pm-meta token.
+// readMeta reads the latest meerkat-meta entry of the session file at path (nil if it has none),
+// decoding only the header and the lines that carry a meerkat-meta token.
 func readMeta(path string, l *lineReader) (*Meta, error) {
 	fh, err := l.open(path)
 	if err != nil {
@@ -307,9 +307,9 @@ func readMeta(path string, l *lineReader) (*Meta, error) {
 	return meta, l.failed()
 }
 
-// metaToken is in every line that carries a pm-meta entry: omp writes the customType value as
+// metaToken is in every line that carries a meerkat-meta entry: omp writes the customType value as
 // a plain JSON string.
-var metaToken = []byte(`"pm-meta"`)
+var metaToken = []byte(`"meerkat-meta"`)
 
 // ParseFile reads an omp session file. Lines before the header may only be title lines.
 func ParseFile(path string) (*File, error) {
@@ -398,7 +398,7 @@ func walk(dir string, session func(path string) error, record func(path string) 
 		case d.IsDir():
 		case strings.HasSuffix(path, ".jsonl"):
 			return session(path)
-		case record != nil && strings.HasSuffix(path, ".pm-failure.json"):
+		case record != nil && strings.HasSuffix(path, ".meerkat-failure.json"):
 			records = append(records, path)
 		}
 		return nil
@@ -466,8 +466,8 @@ func Newest(dir string) ([]Candidate, error) {
 	return out, nil
 }
 
-// Matching returns the sessions under dir whose latest pm-meta keep accepts. Of a session file
-// keep rejects only the header and the pm-meta entries are decoded; a failure record whose
+// Matching returns the sessions under dir whose latest meerkat-meta keep accepts. Of a session
+// file keep rejects only the header and the meerkat-meta entries are decoded; a failure record
 // session file omp never wrote is judged by the identity it records.
 func Matching(dir string, keep func(*Meta) bool) ([]*File, error) {
 	var out []*File
@@ -503,7 +503,7 @@ func Matching(dir string, keep func(*Meta) bool) ([]*File, error) {
 // does not exist. It reports false when the record is old-format (no id) or the session
 // file exists after all; either way there is no extra entry.
 func orphanFile(recPath string) (*File, bool, error) {
-	sessionFile := strings.TrimSuffix(recPath, ".pm-failure.json") + ".jsonl"
+	sessionFile := strings.TrimSuffix(recPath, ".meerkat-failure.json") + ".jsonl"
 	if _, err := os.Stat(sessionFile); err == nil {
 		return nil, false, nil
 	} else if !errors.Is(err, fs.ErrNotExist) {
@@ -527,7 +527,7 @@ func orphanFile(recPath string) (*File, bool, error) {
 	return f, true, nil
 }
 
-// backfillMeta fills f.Meta from rec when the session file carries no pm-meta entry.
+// backfillMeta fills f.Meta from rec when the session file carries no meerkat-meta entry.
 // It reports whether the record named a session at all.
 func backfillMeta(f *File, rec failureRecord) bool {
 	if rec.ID == "" || rec.Kind == "" {

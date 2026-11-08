@@ -29,7 +29,7 @@ func BenchmarkForkSource(b *testing.B) {
 			}
 			cfg := &config.Config{
 				Runtime: config.Runtime{SessionsDir: dir, MaxConcurrentWarmups: 1},
-				Goals:   config.Goals{Base: config.Goal{Tools: []string{"pm_base_ready"}}},
+				Goals:   config.Goals{Base: config.Goal{Tools: []string{"meerkat_base_ready"}}},
 			}
 			m := New(cfg, sessions.NewRegistry(config.LaunchLink{}), checkout.New(filepath.Join(dir, "checkouts")))
 			b.ReportAllocs()

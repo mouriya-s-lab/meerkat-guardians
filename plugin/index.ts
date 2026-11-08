@@ -2,14 +2,14 @@
  * meerkat-guardians omp plugin.
  *
  * The guardian program starts every omp child with:
- * - PM_KIND: "base" | "proxy" | "query"
- * - PM_GOAL_TOOL: comma list of the tools any one of whose successful call completes this session
- * - PM_CONTINUE: the continue text injected while no goal tool has been called
- * - PM_META: JSON metadata recorded as the `pm-meta` custom entry of the session; for a query
+ * - MEERKAT_KIND: "base" | "proxy" | "query"
+ * - MEERKAT_GOAL_TOOL: comma list of the tools any one of whose successful call completes this session
+ * - MEERKAT_CONTINUE: the continue text injected while no goal tool has been called
+ * - MEERKAT_META: JSON metadata recorded as the `meerkat-meta` custom entry of the session; for a query
  *   session it carries `ref` (the implementation issue, owner/name#n) and `ask` (the ask comment id)
- * - PM_GITHUB (query sessions): JSON {pmRepo, project:{owner,number}, fields, code:[{repo,cwd}]}
- * - PM_LAUNCH_LINK: JSON {base, frontend:{kind}}, the configured omp-dispatch launch link that
- *   pm_replace writes into the issue it creates
+ * - MEERKAT_GITHUB (query sessions): JSON {agendaRepo, project:{owner,number}, fields, code:[{repo,cwd}]}
+ * - MEERKAT_LAUNCH_LINK: JSON {base, frontend:{kind}}, the configured omp-dispatch launch link that
+ *   meerkat_replace writes into the issue it creates
  *
  * Base and fork sessions load this plugin unchanged and list the same tools, so a fork keeps the
  * base's prompt cache; only the environment differs.
@@ -39,7 +39,7 @@ interface SelectField<O extends string> {
 }
 
 interface GitHubEnv {
-	pmRepo: string;
+	agendaRepo: string;
 	project: { owner: string; number: number };
 	fields: {
 		status: SelectField<"todo" | "inProgress" | "done" | "superseded">;
@@ -70,10 +70,10 @@ function parseRef(text: string): Ref {
 }
 
 function parseQueryMeta(meta: unknown): QueryMeta {
-	if (typeof meta !== "object" || meta === null) throw new Error("meerkat-guardians plugin: PM_META is not an object");
+	if (typeof meta !== "object" || meta === null) throw new Error("meerkat-guardians plugin: MEERKAT_META is not an object");
 	const { kind, ref, ask } = meta as Record<string, unknown>;
 	if (kind !== "query" || typeof ref !== "string" || typeof ask !== "number" || !Number.isInteger(ask)) {
-		throw new Error("meerkat-guardians plugin: this tool needs a query session (PM_META kind=query with ref and ask)");
+		throw new Error("meerkat-guardians plugin: this tool needs a query session (MEERKAT_META kind=query with ref and ask)");
 	}
 	return { ref: parseRef(ref), ask };
 }
@@ -83,13 +83,13 @@ function parseGitHubEnv(text: string): GitHubEnv {
 	const f = env.fields;
 	const names = [f?.status?.name, f?.kind?.name, f?.agenda?.name, f?.proposer?.name];
 	if (
-		typeof env.pmRepo !== "string" ||
+		typeof env.agendaRepo !== "string" ||
 		typeof env.project?.owner !== "string" ||
 		typeof env.project?.number !== "number" ||
 		names.some(n => typeof n !== "string") ||
 		!Array.isArray(env.code)
 	) {
-		throw new Error("meerkat-guardians plugin: PM_GITHUB lacks pmRepo, project, fields or code");
+		throw new Error("meerkat-guardians plugin: MEERKAT_GITHUB lacks agendaRepo, project, fields or code");
 	}
 	return env;
 }
@@ -104,18 +104,18 @@ function parseLaunchLink(text: string): LaunchLink {
 	const base = link?.base;
 	const kind = link?.frontend?.kind;
 	if (typeof base !== "string" || base === "" || typeof kind !== "string" || kind === "") {
-		throw new Error("meerkat-guardians plugin: PM_LAUNCH_LINK lacks base or frontend.kind");
+		throw new Error("meerkat-guardians plugin: MEERKAT_LAUNCH_LINK lacks base or frontend.kind");
 	}
 	return { base, frontend: { kind } };
 }
 
 // ---------------------------------------------------------------------------------------------
-// Markers (contract §2): last line `<!-- pm:<kind> <compact JSON> -->`, JSON with "v":1.
+// Markers: last line `<!-- meerkat:<kind> <compact JSON> -->`, JSON with "v":1.
 
-const MARKER_LINE = /^<!-- pm:([a-z]+) (\{.*\}) -->$/;
+const MARKER_LINE = /^<!-- meerkat:([a-z]+) (\{.*\}) -->$/;
 
 function marker(kind: string, data: Record<string, unknown>): string {
-	return `\n\n<!-- pm:${kind} ${JSON.stringify({ v: 1, ...data })} -->`;
+	return `\n\n<!-- meerkat:${kind} ${JSON.stringify({ v: 1, ...data })} -->`;
 }
 
 /** Whitespace as String.prototype.trim sees it, so the marker line is found without copying the body. */
@@ -224,7 +224,7 @@ const JQ_SPACE = String.raw`[ \t\n\r\f\u000b\u00a0\u1680\u2000-\u200a\u2028\u202
  * re-checks each kept element in Node.
  */
 const MARKER_SCAN = String.raw`def bodyline: (.body // "") | sub("${JQ_SPACE}+$"; "") | split("\n") | last | sub("^${JQ_SPACE}+"; "") | sub("${JQ_SPACE}+$"; "");
-def marker: (bodyline | capture("<!-- pm:(?<kind>[a-z]+) (?<json>[{].*[}]) -->")) // null;
+def marker: (bodyline | capture("<!-- meerkat:(?<kind>[a-z]+) (?<json>[{].*[}]) -->")) // null;
 def mdata: (marker | .json | try fromjson catch null);`;
 
 /** The launch link of issue ref, started in cwd: <base>/<owner>/<name>/issues/<n>?spec=<{"cwd","frontend"}>. */
@@ -239,13 +239,13 @@ function firstParagraph(text: string): string {
 
 export default function meerkatGuardians(pi: ExtensionAPI): void {
 	const goalTools = new Set(
-		requiredEnv("PM_GOAL_TOOL")
+		requiredEnv("MEERKAT_GOAL_TOOL")
 			.split(",")
 			.map(t => t.trim())
 			.filter(t => t !== ""),
 	);
-	const continueText = requiredEnv("PM_CONTINUE");
-	const meta: unknown = JSON.parse(requiredEnv("PM_META"));
+	const continueText = requiredEnv("MEERKAT_CONTINUE");
+	const meta: unknown = JSON.parse(requiredEnv("MEERKAT_META"));
 	const z = pi.zod;
 	let goalReached = false;
 
@@ -256,13 +256,13 @@ export default function meerkatGuardians(pi: ExtensionAPI): void {
 
 	let githubEnv: GitHubEnv | undefined;
 	const github = (): GitHubEnv => {
-		githubEnv ??= parseGitHubEnv(requiredEnv("PM_GITHUB"));
+		githubEnv ??= parseGitHubEnv(requiredEnv("MEERKAT_GITHUB"));
 		return githubEnv;
 	};
 
 	let launchLinkEnv: LaunchLink | undefined;
 	const launchLink = (): LaunchLink => {
-		launchLinkEnv ??= parseLaunchLink(requiredEnv("PM_LAUNCH_LINK"));
+		launchLinkEnv ??= parseLaunchLink(requiredEnv("MEERKAT_LAUNCH_LINK"));
 		return launchLinkEnv;
 	};
 
@@ -444,7 +444,7 @@ export default function meerkatGuardians(pi: ExtensionAPI): void {
 	// --- Session lifecycle ------------------------------------------------------------------
 
 	pi.on("session_start", () => {
-		pi.appendEntry("pm-meta", meta);
+		pi.appendEntry("meerkat-meta", meta);
 	});
 
 	pi.on("session_stop", () => {
@@ -455,7 +455,7 @@ export default function meerkatGuardians(pi: ExtensionAPI): void {
 	// --- Base and proxy tools ----------------------------------------------------------------
 
 	pi.registerTool({
-		name: "pm_base_ready",
+		name: "meerkat_base_ready",
 		label: "Base ready",
 		description:
 			"Call once you have finished reading the repository as instructed; summary = what the repo is and where the main parts live.",
@@ -465,12 +465,12 @@ export default function meerkatGuardians(pi: ExtensionAPI): void {
 		loadMode: "essential",
 		approval: "read",
 		async execute() {
-			return complete("pm_base_ready", "recorded");
+			return complete("meerkat_base_ready", "recorded");
 		},
 	});
 
 	pi.registerTool({
-		name: "pm_return_facts",
+		name: "meerkat_return_facts",
 		label: "Return facts",
 		description:
 			"Return the facts answering the question, each with repo-relative path and line numbers or design section; this ends your task.",
@@ -480,14 +480,14 @@ export default function meerkatGuardians(pi: ExtensionAPI): void {
 		loadMode: "essential",
 		approval: "read",
 		async execute() {
-			return complete("pm_return_facts", "recorded");
+			return complete("meerkat_return_facts", "recorded");
 		},
 	});
 
 	// --- Query tools: settle the worker's ask ------------------------------------------------
 
 	pi.registerTool({
-		name: "pm_reply",
+		name: "meerkat_reply",
 		label: "Reply to ask",
 		description:
 			"Settle the worker's decision ask by replying on the implementation issue; body = the answer the worker continues with. This ends your task.",
@@ -499,16 +499,16 @@ export default function meerkatGuardians(pi: ExtensionAPI): void {
 		async execute(_toolCallId, params) {
 			const q = parseQueryMeta(meta);
 			const existing = settlement(await markers(q.ref, q.ask), q.ask);
-			if (existing) return alreadyRecorded("pm_reply", q, existing);
+			if (existing) return alreadyRecorded("meerkat_reply", q, existing);
 			const c = await rest<{ html_url: string }>("POST", `repos/${q.ref.repo}/issues/${q.ref.number}/comments`, {
 				body: params.body + marker("reply", { ask: q.ask, decision: null }),
 			});
-			return complete("pm_reply", `Replied to ask ${q.ask} on ${q.ref.text}: ${c.html_url}`);
+			return complete("meerkat_reply", `Replied to ask ${q.ask} on ${q.ref.text}: ${c.html_url}`);
 		},
 	});
 
 	pi.registerTool({
-		name: "pm_replace",
+		name: "meerkat_replace",
 		label: "Replace issue",
 		description:
 			"Settle the worker's decision ask by replacing the implementation issue with a new one in the same repository; the old issue is closed as not planned. title = new issue title; body = first paragraph the reason for replacing, then what to build and how to accept it. This ends your task.",
@@ -525,9 +525,9 @@ export default function meerkatGuardians(pi: ExtensionAPI): void {
 			const env = github();
 			const launch = launchLink();
 			const code = env.code.find(c => c.repo === q.ref.repo);
-			if (!code) throw new Error(`${q.ref.repo} is not a code repository in PM_GITHUB`);
+			if (!code) throw new Error(`${q.ref.repo} is not a code repository in MEERKAT_GITHUB`);
 			const existing = settlement(await markers(q.ref, q.ask), q.ask);
-			if (existing && existing.kind !== "replaced") return alreadyRecorded("pm_replace", q, existing);
+			if (existing && existing.kind !== "replaced") return alreadyRecorded("meerkat_replace", q, existing);
 			const done: string[] = [];
 
 			// a. An issue an interrupted run already created for this ask.
@@ -628,15 +628,15 @@ export default function meerkatGuardians(pi: ExtensionAPI): void {
 			await rest("PATCH", `repos/${q.ref.repo}/issues/${q.ref.number}`, { state: "closed", state_reason: "not_planned" });
 			done.push(`${q.ref.text} ${f.status.name}=${f.status.options.superseded}, closed as not planned`);
 
-			return complete("pm_replace", `Replaced ${q.ref.text} by ${newRef.text} for ask ${q.ask}:\n- ${done.join("\n- ")}`);
+			return complete("meerkat_replace", `Replaced ${q.ref.text} by ${newRef.text} for ask ${q.ask}:\n- ${done.join("\n- ")}`);
 		},
 	});
 
 	pi.registerTool({
-		name: "pm_escalate",
+		name: "meerkat_escalate",
 		label: "Escalate ask",
 		description:
-			"Settle the worker's decision ask by raising it as an agenda issue in the PM repository for the council to decide. title = agenda title; body = what the council must decide and its background. This ends your task.",
+			"Settle the worker's decision ask by raising it as an agenda issue in the agenda repository for the council to decide. title = agenda title; body = what the council must decide and its background. This ends your task.",
 		parameters: z.object({
 			title: z.string().describe("Title of the agenda issue"),
 			body: z.string().describe("Markdown: the decision the council must make and its background"),
@@ -647,7 +647,7 @@ export default function meerkatGuardians(pi: ExtensionAPI): void {
 			const q = parseQueryMeta(meta);
 			const env = github();
 			const existing = settlement(await markers(q.ref, q.ask), q.ask);
-			if (existing) return alreadyRecorded("pm_escalate", q, existing);
+			if (existing) return alreadyRecorded("meerkat_escalate", q, existing);
 			const done: string[] = [];
 
 			const agendas = await scan<{ number: number; node_id: string; url: string; line: string }>(
@@ -660,7 +660,7 @@ export default function meerkatGuardians(pi: ExtensionAPI): void {
 | select($d != null and $d.v == 1)
 | select($d.issue == ${JSON.stringify(q.ref.text)} and $d.ask == ${q.ask})
 | {number: .number, node_id: .node_id, url: .html_url, line: bodyline}`,
-				`repos/${env.pmRepo}/issues?state=all&per_page=100`,
+				`repos/${env.agendaRepo}/issues?state=all&per_page=100`,
 			);
 			const reused = agendas.find(a => {
 				const m = parseMarker(a.line);
@@ -671,13 +671,13 @@ export default function meerkatGuardians(pi: ExtensionAPI): void {
 				agenda = { number: reused.number, node_id: reused.node_id, html_url: reused.url };
 				done.push(`reused agenda issue ${agenda.html_url}`);
 			} else {
-				agenda = await rest<RestIssue>("POST", `repos/${env.pmRepo}/issues`, {
+				agenda = await rest<RestIssue>("POST", `repos/${env.agendaRepo}/issues`, {
 					title: params.title,
 					body: params.body + marker("escalation", { issue: q.ref.text, ask: q.ask }),
 				});
 				done.push(`created agenda issue ${agenda.html_url}`);
 			}
-			const agendaRef = `${env.pmRepo}#${agenda.number}`;
+			const agendaRef = `${env.agendaRepo}#${agenda.number}`;
 			const f = env.fields;
 			const item = await projectItem(agenda.node_id);
 			await setOption(item, f.kind.name, f.kind.options.agenda);
@@ -688,7 +688,7 @@ export default function meerkatGuardians(pi: ExtensionAPI): void {
 				body: `该询问需要议会决策，已提为议题 ${agendaRef}；议会定案后以答复或取代了结。` + marker("escalated", { ask: q.ask, agenda: agendaRef }),
 			});
 			done.push(`escalated marker on ${q.ref.text} ${c.html_url}`);
-			return complete("pm_escalate", `Escalated ask ${q.ask} on ${q.ref.text} to ${agendaRef}:\n- ${done.join("\n- ")}`);
+			return complete("meerkat_escalate", `Escalated ask ${q.ask} on ${q.ref.text} to ${agendaRef}:\n- ${done.join("\n- ")}`);
 		},
 	});
 }

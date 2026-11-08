@@ -19,7 +19,7 @@ type sessionFile struct {
 	path   string          // the .jsonl path get_state reports
 	id     string          // the session id in the header and get_state
 	parent string          // the fork source's session id, the header's parentSession; empty for a fresh session
-	meta   json.RawMessage // PM_META, written as the pm-meta entry right after the header
+	meta   json.RawMessage // MEERKAT_META, written as the meerkat-meta entry right after the header
 	fh     *os.File        // nil until start creates the file
 }
 
@@ -66,7 +66,7 @@ func newSessionFile(dir string, meta json.RawMessage, parent string) (*sessionFi
 }
 
 // start creates the file and writes the session header, then meta (when non-empty) as the
-// pm-meta custom entry the council plugin appends at session start.
+// meerkat-meta custom entry the plugins append at session start.
 func (s *sessionFile) start() error {
 	fh, err := os.Create(s.path)
 	if err != nil {
@@ -78,7 +78,7 @@ func (s *sessionFile) start() error {
 		return err
 	}
 	if len(s.meta) > 0 {
-		return s.write(sessionEntry{Type: "custom", CustomType: "pm-meta", ID: shortID(), Timestamp: nowStamp(),
+		return s.write(sessionEntry{Type: "custom", CustomType: "meerkat-meta", ID: shortID(), Timestamp: nowStamp(),
 			Runtime: runtimeInfo{Version: "fake-omp"}, Data: s.meta})
 	}
 	return nil

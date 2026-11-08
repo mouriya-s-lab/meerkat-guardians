@@ -1,4 +1,4 @@
-// Package api serves the guardians HTTP API (contract §3 and §4).
+// Package api serves the guardians HTTP API.
 package api
 
 import (

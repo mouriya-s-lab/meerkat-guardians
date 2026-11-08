@@ -1,5 +1,5 @@
-// Package markers parses the machine markers of contract §2 that the guardians program reads:
-// a last line `<!-- pm:<kind> <JSON> -->` whose single-line JSON object carries "v":1.
+// Package markers parses the machine markers the guardians program reads:
+// a last line `<!-- meerkat:<kind> <JSON> -->` whose single-line JSON object carries "v":1.
 // The program reads `ask` and the three markers that settle one (`reply`, `replaced`,
 // `escalated`); it writes none of them (the plugin does).
 package markers
@@ -46,7 +46,7 @@ func (Reply) marker()     {}
 func (Replaced) marker()  {}
 func (Escalated) marker() {}
 
-var lineRe = regexp.MustCompile(`^<!-- pm:([a-z]+) (\{.*\}) -->$`)
+var lineRe = regexp.MustCompile(`^<!-- meerkat:([a-z]+) (\{.*\}) -->$`)
 
 // split returns the body before the last line and the last line, ignoring trailing whitespace
 // and carriage returns.
@@ -57,9 +57,9 @@ func split(body string) (rest, last string) {
 }
 
 // Parse returns the marker on the last line of body. It returns nil, nil when the last line is
-// not a pm marker or is a kind the program does not read, and an error when it is a pm marker
-// line whose JSON is invalid, lacks "v":1, or has a missing or mistyped field (contract §2:
-// such a marker counts as absent).
+// not a meerkat marker or is a kind the program does not read, and an error when it is a meerkat
+// marker line whose JSON is invalid, lacks "v":1, or has a missing or mistyped field: such a
+// marker counts as absent.
 func Parse(body string) (Marker, error) {
 	_, last := split(body)
 	m := lineRe.FindStringSubmatch(last)
@@ -71,13 +71,13 @@ func Parse(body string) (Marker, error) {
 	dec.UseNumber()
 	var obj map[string]json.RawMessage
 	if err := dec.Decode(&obj); err != nil {
-		return nil, fmt.Errorf("pm:%s: %w", kind, err)
+		return nil, fmt.Errorf("meerkat:%s: %w", kind, err)
 	}
 	f := fields{kind: kind, obj: obj}
 	if v, err := f.int("v"); err != nil {
 		return nil, err
 	} else if v != 1 {
-		return nil, fmt.Errorf("pm:%s: v is %d, want 1", kind, v)
+		return nil, fmt.Errorf("meerkat:%s: v is %d, want 1", kind, v)
 	}
 	switch kind {
 	case "ask":
@@ -87,7 +87,7 @@ func Parse(body string) (Marker, error) {
 		}
 		t, ok := config.ParseTier(tier)
 		if !ok {
-			return nil, fmt.Errorf("pm:ask: tier %q is not simple or complex", tier)
+			return nil, fmt.Errorf("meerkat:ask: tier %q is not simple or complex", tier)
 		}
 		session, err := f.str("session")
 		if err != nil {
@@ -128,8 +128,8 @@ func Parse(body string) (Marker, error) {
 	return nil, nil
 }
 
-// Strip returns body without its last line when that line is a pm marker, trailing whitespace
-// trimmed.
+// Strip returns body without its last line when that line is a meerkat marker, trailing
+// whitespace trimmed.
 func Strip(body string) string {
 	rest, last := split(body)
 	if !lineRe.MatchString(last) {
@@ -146,7 +146,7 @@ type fields struct {
 func (f fields) raw(key string) (json.RawMessage, error) {
 	r, ok := f.obj[key]
 	if !ok {
-		return nil, fmt.Errorf("pm:%s: %s missing", f.kind, key)
+		return nil, fmt.Errorf("meerkat:%s: %s missing", f.kind, key)
 	}
 	return r, nil
 }
@@ -162,15 +162,15 @@ func (f fields) int(key string) (int64, error) {
 	dec.UseNumber()
 	var v any
 	if err := dec.Decode(&v); err != nil {
-		return 0, fmt.Errorf("pm:%s: %s: %w", f.kind, key, err)
+		return 0, fmt.Errorf("meerkat:%s: %s: %w", f.kind, key, err)
 	}
 	n, ok := v.(json.Number)
 	if !ok {
-		return 0, fmt.Errorf("pm:%s: %s is not an integer", f.kind, key)
+		return 0, fmt.Errorf("meerkat:%s: %s is not an integer", f.kind, key)
 	}
 	i, err := n.Int64()
 	if err != nil {
-		return 0, fmt.Errorf("pm:%s: %s is not an integer", f.kind, key)
+		return 0, fmt.Errorf("meerkat:%s: %s is not an integer", f.kind, key)
 	}
 	return i, nil
 }
@@ -197,7 +197,7 @@ func (f fields) str(key string) (string, error) {
 	}
 	var s string
 	if isNull(r) || json.Unmarshal(r, &s) != nil {
-		return "", fmt.Errorf("pm:%s: %s is not a string", f.kind, key)
+		return "", fmt.Errorf("meerkat:%s: %s is not a string", f.kind, key)
 	}
 	return s, nil
 }
@@ -230,7 +230,7 @@ type PendingAsk struct {
 	Question string
 }
 
-// Invalid is a comment whose last line is a pm marker that does not parse.
+// Invalid is a comment whose last line is a meerkat marker that does not parse.
 type Invalid struct {
 	Comment int64
 	Err     error

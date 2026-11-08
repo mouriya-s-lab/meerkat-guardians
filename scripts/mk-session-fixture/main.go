@@ -17,12 +17,12 @@ import (
 func main() {
 	root := flag.String("root", "", "sessionsDir to write (required)")
 	base := flag.String("base", "", "base id, config.BaseID(guardian, repo, model) (required)")
-	model := flag.String("model", "", "model recorded in pm-meta")
+	model := flag.String("model", "", "model recorded in meerkat-meta")
 	n := flag.Int("n", 200, "historic base, query and proxy files, each")
 	fileBytes := flag.Int("file-bytes", 1<<20, "approximate size of every session file")
 	lineBytes := flag.Int("line-bytes", 64<<10, "approximate payload size of one large line")
 	askFrom := flag.Int64("ask-from", 1000, "first query ask comment id")
-	fingerprint := flag.String("fingerprint", "", "ready base pm-meta fingerprint as JSON")
+	fingerprint := flag.String("fingerprint", "", "ready base meerkat-meta fingerprint as JSON")
 	flag.Parse()
 	if *root == "" || *base == "" {
 		fmt.Fprintln(os.Stderr, "mk-session-fixture: -root and -base are required")

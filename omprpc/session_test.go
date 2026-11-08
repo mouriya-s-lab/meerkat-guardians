@@ -26,10 +26,10 @@ func runFake(t *testing.T, plan string, maxContinue int, maxDuration time.Durati
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	res, err := RunSession(ctx, SessionSpec{
-		Options:            Options{Bin: exe, Env: []string{"FAKE_OMP_PLAN=" + plan, "FAKE_OMP_GOAL=pm_return_facts"}, Args: []string{"--session-dir", sessDir}},
+		Options:            Options{Bin: exe, Env: []string{"FAKE_OMP_PLAN=" + plan, "FAKE_OMP_GOAL=meerkat_return_facts"}, Args: []string{"--session-dir", sessDir}},
 		Opening:            "open",
 		Continue:           "keep going",
-		GoalTools:          []string{"pm_base_ready", "pm_return_facts"},
+		GoalTools:          []string{"meerkat_base_ready", "meerkat_return_facts"},
 		MaxContinuePrompts: maxContinue,
 		ReadyTimeout:       10 * time.Second,
 		ExitGrace:          5 * time.Second,
@@ -78,7 +78,7 @@ func TestRunSessionGoalReached(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.ToolName != "pm_return_facts" || string(res.Args) != `{"facts":"open"}` {
+	if res.ToolName != "meerkat_return_facts" || string(res.Args) != `{"facts":"open"}` {
 		t.Fatalf("result = %+v", res)
 	}
 	if strings.Join(ready, " ") != res.SessionID+" "+res.SessionFile {

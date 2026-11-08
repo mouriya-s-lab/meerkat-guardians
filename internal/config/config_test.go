@@ -70,10 +70,10 @@ func TestLoadExample(t *testing.T) {
 	if !ok {
 		t.Fatal("guardian missing")
 	}
-	if g.ToolsArg() != "read,grep,glob,pm_base_ready,pm_return_facts,pm_reply,pm_replace,pm_escalate" {
+	if g.ToolsArg() != "read,grep,glob,meerkat_base_ready,meerkat_return_facts,meerkat_reply,meerkat_replace,meerkat_escalate" {
 		t.Fatalf("tools = %s", g.ToolsArg())
 	}
-	if got := strings.Join(cfg.Goals.Query.Tools, ","); got != "pm_reply,pm_replace,pm_escalate" {
+	if got := strings.Join(cfg.Goals.Query.Tools, ","); got != "meerkat_reply,meerkat_replace,meerkat_escalate" {
 		t.Fatalf("query tools = %s", got)
 	}
 	if cfg.Project.Fields.Status.Options.InProgress != "In Progress" || cfg.Project.Fields.Agenda.Name != "Agenda" {
@@ -100,7 +100,7 @@ func TestLoadExample(t *testing.T) {
 			t.Fatalf("opening lacks %q: %s", want, opening)
 		}
 	}
-	if !strings.Contains(cont, "pm_return_facts") {
+	if !strings.Contains(cont, "meerkat_return_facts") {
 		t.Fatalf("continue = %s", cont)
 	}
 	if !cfg.Repos.Readable("mouriya-s-lab/meerkat-e2e-design") || cfg.Repos.Readable("mouriya-s-lab/meerkat-e2e-agenda") {
@@ -160,12 +160,12 @@ func TestLoadErrorsNameKeyPath(t *testing.T) {
 		{
 			"negative project number",
 			map[string][2]string{"shared/repos.yaml": {"number: 1", "number: -2"}},
-			"shared/repos.yaml: pm.project.number: must be a positive integer, got -2",
+			"shared/repos.yaml: agenda.project.number: must be a positive integer, got -2",
 		},
 		{
 			"missing project number",
 			map[string][2]string{"shared/repos.yaml": {", number: 1", ""}},
-			"shared/repos.yaml: pm.project.number: missing",
+			"shared/repos.yaml: agenda.project.number: missing",
 		},
 		{
 			"route tier without base",
@@ -189,8 +189,8 @@ func TestLoadErrorsNameKeyPath(t *testing.T) {
 		},
 		{
 			"goal tool not a plugin tool",
-			map[string][2]string{"guardians/goals.yaml": {"tools: [pm_reply, pm_replace, pm_escalate]", "tools: [pm_reply, pm_answer]"}},
-			"guardians/goals.yaml: query.tools[1]: \"pm_answer\" is not a plugin tool",
+			map[string][2]string{"guardians/goals.yaml": {"tools: [meerkat_reply, meerkat_replace, meerkat_escalate]", "tools: [meerkat_reply, meerkat_answer]"}},
+			"guardians/goals.yaml: query.tools[1]: \"meerkat_answer\" is not a plugin tool",
 		},
 		{
 			"missing project option",

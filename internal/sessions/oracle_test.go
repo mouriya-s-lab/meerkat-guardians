@@ -68,7 +68,7 @@ func oracleParseFile(path string) (*File, error) {
 		if ts.After(f.LastAt) {
 			f.LastAt = ts
 		}
-		if e.Type == "custom" && e.CustomType == "pm-meta" {
+		if e.Type == "custom" && e.CustomType == "meerkat-meta" {
 			var m Meta
 			if json.Unmarshal(e.Data, &m) == nil {
 				f.Meta = &m
@@ -132,7 +132,7 @@ func oracleScanDir(dir string) ([]*File, error) {
 				return err
 			}
 			files = append(files, f)
-		case strings.HasSuffix(path, ".pm-failure.json"):
+		case strings.HasSuffix(path, ".meerkat-failure.json"):
 			orphans = append(orphans, path)
 		}
 		return nil
@@ -204,7 +204,7 @@ func edgeDir(t *testing.T) string {
 		return `{"type":"session","version":3,"id":"` + id + `","timestamp":"` + ts + `","cwd":"/c"}`
 	}
 	meta := func(kind string, ask int, ts string) string {
-		return fmt.Sprintf(`{"type":"custom","customType":"pm-meta","data":{"kind":%q,"ask":%d,"base":"b","model":"m"},"id":"x","timestamp":%q}`, kind, ask, ts)
+		return fmt.Sprintf(`{"type":"custom","customType":"meerkat-meta","data":{"kind":%q,"ask":%d,"base":"b","model":"m"},"id":"x","timestamp":%q}`, kind, ask, ts)
 	}
 	ok := func(tool, ts string) string {
 		return `{"type":"message","id":"r","timestamp":"` + ts + `","message":{"role":"toolResult","toolName":"` + tool + `","isError":false}}`
@@ -217,10 +217,10 @@ func edgeDir(t *testing.T) string {
 		}
 		put("real/"+strings.ReplaceAll(name, "/", "_"), strings.TrimSuffix(string(b), "\n"))
 	}
-	put("a/corrupt-before-header.jsonl", `{"type":"title","title":""}`, `{"type":"sess`, hdr("e1", t0), meta("query", 1, t0), ok("pm_reply", "2026-11-07T01:00:02.000Z"))
+	put("a/corrupt-before-header.jsonl", `{"type":"title","title":""}`, `{"type":"sess`, hdr("e1", t0), meta("query", 1, t0), ok("meerkat_reply", "2026-11-07T01:00:02.000Z"))
 	// Equal header timestamps, in different directories and orders.
 	put("b/tie-1.jsonl", hdr("tie-1", t0), meta("query", 2, t0))
-	put("a/tie-2.jsonl", hdr("tie-2", t0), meta("query", 2, t0), ok("pm_reply", "2026-11-07T01:00:03.000Z"))
+	put("a/tie-2.jsonl", hdr("tie-2", t0), meta("query", 2, t0), ok("meerkat_reply", "2026-11-07T01:00:03.000Z"))
 	put("c/tie-3.jsonl", hdr("tie-3", t0), meta("proxy", 0, t0))
 	put("c/empty.jsonl")
 	put("c/title-only.jsonl", `{"type":"title","title":""}`)
@@ -228,28 +228,28 @@ func edgeDir(t *testing.T) string {
 	put("c/empty-id-then-entry.jsonl", hdr("", t0), meta("base", 0, t0))
 	put("d/odd-lines.jsonl", hdr("odd", "2026-11-07T03:00:00.000Z"),
 		meta("query", 3, "2026-11-07T03:00:01.000Z"),
-		`{"type":"custom","customType":"pm-meta","id":"x","timestamp":"2026-11-07T03:00:02.000Z"}`,
-		`{"type":"custom","customType":"pm-meta","data":"not a meta","id":"x","timestamp":"2026-11-07T03:00:03.000Z"}`,
+		`{"type":"custom","customType":"meerkat-meta","id":"x","timestamp":"2026-11-07T03:00:02.000Z"}`,
+		`{"type":"custom","customType":"meerkat-meta","data":"not a meta","id":"x","timestamp":"2026-11-07T03:00:03.000Z"}`,
 		`{"type":"message","id":"m","timestamp":"2026-11-07T03:00:04.000Z","message":null}`,
 		`{"type":"message","id":5,"timestamp":"2026-11-07T03:00:05.000Z","message":{"role":"toolResult","toolName":"typed-id","isError":false}}`,
 		`{"type":"message","id":"m","parentSession":7,"timestamp":"2026-11-07T03:00:06.000Z","message":{"role":"toolResult","toolName":"typed-parent","isError":false}}`,
 		`{"type":"message","id":"m","timestamp":"2026-11-07T03:00:07.000Z","message":{"role":"assistant","errorMessage":"boom"}}`,
 		`{"type":"message","id":"m","timestamp":"2026-11-07T03:00:08.000Z","message":"text"}`,
-		ok("pm_escalate", "2026-11-07T03:00:09.000Z"),
-		`{"type":"message","id":"m","timestamp":"2026-11-07T03:00:10.000Z","message":{"role":"toolResult","toolName":"pm_escalate","isError":true}}`,
-		`{"type":"custom","customType":"pm-meta","data":null,"id":"x","timestamp":"2026-11-07T03:00:11.000Z"}`,
-		`{"type":"custom","customType":"other","data":{"note":"\"pm-meta\""},"id":"x","timestamp":"2026-11-07T03:00:12.000Z"}`,
+		ok("meerkat_escalate", "2026-11-07T03:00:09.000Z"),
+		`{"type":"message","id":"m","timestamp":"2026-11-07T03:00:10.000Z","message":{"role":"toolResult","toolName":"meerkat_escalate","isError":true}}`,
+		`{"type":"custom","customType":"meerkat-meta","data":null,"id":"x","timestamp":"2026-11-07T03:00:11.000Z"}`,
+		`{"type":"custom","customType":"other","data":{"note":"\"meerkat-meta\""},"id":"x","timestamp":"2026-11-07T03:00:12.000Z"}`,
 		`{"type":"message","id":"m","timestamp":"2026-11-07T03:00:13`)
 	put("d/null-meta-last.jsonl", hdr("nullmeta", "2026-11-07T03:30:00.000Z"),
 		meta("query", 4, "2026-11-07T03:30:01.000Z"),
-		`{"type":"custom","customType":"pm-meta","data":null,"id":"x","timestamp":"2026-11-07T03:30:02.000Z"}`)
+		`{"type":"custom","customType":"meerkat-meta","data":null,"id":"x","timestamp":"2026-11-07T03:30:02.000Z"}`)
 	// Line endings: CRLF, blank lines, and a last line without a newline.
 	if err := os.WriteFile(filepath.Join(dir, "d/crlf.jsonl"), []byte(hdr("crlf", "2026-11-07T03:40:00.000Z")+"\r\n\r\n"+
-		meta("query", 7, "2026-11-07T03:40:01.000Z")+"\r\n\n"+ok("pm_reply", "2026-11-07T03:40:02.000Z")), 0o644); err != nil {
+		meta("query", 7, "2026-11-07T03:40:01.000Z")+"\r\n\n"+ok("meerkat_reply", "2026-11-07T03:40:02.000Z")), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	put("d/fork.jsonl", hdr("fork", "2026-11-07T04:00:00.000Z"),
-		meta("base", 0, "2026-11-07T00:00:00.000Z"), ok("pm_base_ready", "2026-11-07T00:00:01.000Z"),
+		meta("base", 0, "2026-11-07T00:00:00.000Z"), ok("meerkat_base_ready", "2026-11-07T00:00:01.000Z"),
 		meta("query", 5, "2026-11-07T04:00:01.000Z"), ok("read", "2026-11-07T04:00:02.000Z"))
 	// Failure records: beside a file, orphan (new format, ties a file's start), old format.
 	failed := put("e/failed.jsonl", hdr("failed", "2026-11-07T05:00:00.000Z"), meta("query", 6, "2026-11-07T05:00:01.000Z"))
@@ -329,7 +329,7 @@ func TestOracleNewest(t *testing.T) {
 }
 
 func TestOracleList(t *testing.T) {
-	goals := map[Kind][]string{KindBase: {"pm_base_ready"}, KindProxy: {"pm_return_facts"}, KindQuery: {"pm_reply", "pm_replace", "pm_escalate"}}
+	goals := map[Kind][]string{KindBase: {"meerkat_base_ready"}, KindProxy: {"meerkat_return_facts"}, KindQuery: {"meerkat_reply", "meerkat_replace", "meerkat_escalate"}}
 	for name, dir := range oracleDirs(t) {
 		all := oracleNewest(t, dir)
 		r := NewRegistry(config.LaunchLink{})
@@ -364,7 +364,7 @@ func TestOracleFindFile(t *testing.T) {
 	}
 }
 
-// Matching keeps exactly the files the old claim loop kept: those whose latest pm-meta matches.
+// Matching keeps exactly the files the old claim loop kept: those whose latest meerkat-meta matches.
 func TestOracleMatching(t *testing.T) {
 	for name, dir := range oracleDirs(t) {
 		all := oracleNewestUnsorted(t, dir)

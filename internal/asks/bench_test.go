@@ -29,7 +29,7 @@ func BenchmarkClaim(b *testing.B) {
 			}
 			cfg := &config.Config{
 				Runtime: config.Runtime{SessionsDir: dir},
-				Goals:   config.Goals{Query: config.Goal{Tools: []string{"pm_reply", "pm_replace", "pm_escalate"}}},
+				Goals:   config.Goals{Query: config.Goal{Tools: []string{"meerkat_reply", "meerkat_replace", "meerkat_escalate"}}},
 			}
 			reg := sessions.NewRegistry(config.LaunchLink{})
 			co := checkout.New(filepath.Join(dir, "checkouts"))

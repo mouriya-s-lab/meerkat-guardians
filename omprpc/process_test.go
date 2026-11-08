@@ -44,7 +44,7 @@ func goalEnv(t *testing.T) []string {
 	if err := os.WriteFile(argsFile, []byte(`{"facts":"main.go:15"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	return []string{"FAKE_OMP_GOAL=pm_return_facts", "FAKE_OMP_ARGS=" + argsFile}
+	return []string{"FAKE_OMP_GOAL=meerkat_return_facts", "FAKE_OMP_ARGS=" + argsFile}
 }
 
 func TestStartFailsWithStderrTail(t *testing.T) {
@@ -149,7 +149,7 @@ func TestCallAndEvents(t *testing.T) {
 	if updates != 500 {
 		t.Fatalf("updates = %d", updates)
 	}
-	if start.ToolName != "pm_return_facts" || string(start.Args) != `{"facts":"main.go:15"}` {
+	if start.ToolName != "meerkat_return_facts" || string(start.Args) != `{"facts":"main.go:15"}` {
 		t.Fatalf("start = %+v", start)
 	}
 	if start.ToolCallID != end.ToolCallID || end.IsError {

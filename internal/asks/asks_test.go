@@ -49,17 +49,17 @@ func fixture(t *testing.T) *Runner {
 		},
 		Routes: []config.Route{{Repo: "o/code", Guardian: "g", Tiers: config.Tiers{Simple: "m1", Complex: "m2"}}},
 		Goals: config.Goals{
-			Base:  config.Goal{Tools: []string{"pm_base_ready"}},
-			Query: config.Goal{Tools: []string{"pm_reply", "pm_replace", "pm_escalate"}},
+			Base:  config.Goal{Tools: []string{"meerkat_base_ready"}},
+			Query: config.Goal{Tools: []string{"meerkat_reply", "meerkat_replace", "meerkat_escalate"}},
 		},
 		Repos: config.Repos{Code: []config.CodeRepo{{Repo: "o/code", Cwd: "/w/code"}, {Repo: "o/unrouted", Cwd: "/w/u"}}},
 	}
 	writeSession(t, filepath.Join(dir, "bases", ready, "b.jsonl"),
-		fmt.Sprintf(header, "base-1"), toolResult("pm_base_ready"))
+		fmt.Sprintf(header, "base-1"), toolResult("meerkat_base_ready"))
 	meta := func(ask string) string {
-		return `{"type":"custom","customType":"pm-meta","data":{"kind":"query","ref":"o/code#1","ask":` + ask + `,"base":"` + ready + `","model":"m1","tier":"simple"},"id":"x","timestamp":"2026-11-07T01:00:01.000Z"}`
+		return `{"type":"custom","customType":"meerkat-meta","data":{"kind":"query","ref":"o/code#1","ask":` + ask + `,"base":"` + ready + `","model":"m1","tier":"simple"},"id":"x","timestamp":"2026-11-07T01:00:01.000Z"}`
 	}
-	writeSession(t, filepath.Join(dir, "query", ready, "q77.jsonl"), fmt.Sprintf(header, "q-77"), meta("77"), toolResult("pm_replace"))
+	writeSession(t, filepath.Join(dir, "query", ready, "q77.jsonl"), fmt.Sprintf(header, "q-77"), meta("77"), toolResult("meerkat_replace"))
 	writeSession(t, filepath.Join(dir, "query", ready, "q79.jsonl"), fmt.Sprintf(header, "q-79"), meta("79"), toolResult("read"))
 	reg := sessions.NewRegistry(cfg.LaunchLink)
 	co := checkout.New(filepath.Join(dir, "checkouts"))

@@ -26,7 +26,7 @@ func TestFakeOmpBinary(t *testing.T) {
 			Options:            Options{Bin: bin, Args: []string{"--session-dir", sessDir}, Env: env},
 			Opening:            "open",
 			Continue:           "keep going",
-			GoalTools:          []string{"pm_base_ready", "pm_return_facts"},
+			GoalTools:          []string{"meerkat_base_ready", "meerkat_return_facts"},
 			MaxContinuePrompts: 3,
 			ReadyTimeout:       10 * time.Second,
 			ExitGrace:          5 * time.Second,
@@ -103,7 +103,7 @@ func TestFakeOmpBinary(t *testing.T) {
 			t.Fatal(err)
 		}
 		s := spec(sessDir, []string{
-			"FAKE_OMP_PLAN=goal", "FAKE_OMP_GOAL=pm_return_facts", "FAKE_OMP_ARGS=" + argsFile,
+			"FAKE_OMP_PLAN=goal", "FAKE_OMP_GOAL=meerkat_return_facts", "FAKE_OMP_ARGS=" + argsFile,
 		}, 0)
 		// Like omp's, a fresh session has no file at ready; get_state already names it.
 		var readyErr error
@@ -115,7 +115,7 @@ func TestFakeOmpBinary(t *testing.T) {
 		if !errors.Is(readyErr, fs.ErrNotExist) {
 			t.Fatalf("session file at ready: %v, want it absent", readyErr)
 		}
-		if res.ToolName != "pm_return_facts" || string(res.Args) != `{"facts":["one","two"]}` {
+		if res.ToolName != "meerkat_return_facts" || string(res.Args) != `{"facts":["one","two"]}` {
 			t.Fatalf("RunSession = {tool %s args %s}, want the goal tool and the file's arguments", res.ToolName, res.Args)
 		}
 		// The first assistant message created the file at get_state's path: the header plus
@@ -206,15 +206,15 @@ func TestFakeOmpBinary(t *testing.T) {
 		}
 	})
 
-	// The council plugin appends PM_META as the pm-meta entry at session start; the council's
-	// session list reads the session kind from it, so the fake writes it right after the header.
+	// The plugins append MEERKAT_META as the meerkat-meta entry at session start; the programs'
+	// session lists read the session kind from it, so the fake writes it right after the header.
 	t.Run("meta", func(t *testing.T) {
 		sessDir := t.TempDir()
-		meta := `{"kind":"draft","seat":"Coordination","ref":"o/pm#2","round":1,"version":1}`
-		if _, err := drive(t, sessDir, []string{"FAKE_OMP_PLAN=goal", "PM_META=" + meta}, 0); err != nil {
+		meta := `{"kind":"draft","seat":"Coordination","ref":"o/agenda#2","round":1,"version":1}`
+		if _, err := drive(t, sessDir, []string{"FAKE_OMP_PLAN=goal", "MEERKAT_META=" + meta}, 0); err != nil {
 			t.Fatal(err)
 		}
-		want := "session custom:pm-meta message:assistant custom:tool_execution_start custom:tool_execution_end message:toolResult"
+		want := "session custom:meerkat-meta message:assistant custom:tool_execution_start custom:tool_execution_end message:toolResult"
 		if got := strings.Join(sessionEntries(t, sessDir), " "); got != want {
 			t.Fatalf("session entries = %q, want %q", got, want)
 		}
@@ -227,14 +227,14 @@ func TestFakeOmpBinary(t *testing.T) {
 			Data json.RawMessage `json:"data"`
 		}
 		if err := json.Unmarshal([]byte(strings.Split(string(b), "\n")[1]), &e); err != nil || string(e.Data) != meta {
-			t.Fatalf("pm-meta data = %s (%v), want %s", e.Data, err, meta)
+			t.Fatalf("meerkat-meta data = %s (%v), want %s", e.Data, err, meta)
 		}
 	})
 
 	t.Run("badmeta", func(t *testing.T) {
-		_, err := drive(t, t.TempDir(), []string{"FAKE_OMP_PLAN=goal", "PM_META={not json"}, 0)
-		if err == nil || !strings.Contains(err.Error(), "PM_META is not JSON") {
-			t.Fatalf("err = %v, want the startup failure naming PM_META", err)
+		_, err := drive(t, t.TempDir(), []string{"FAKE_OMP_PLAN=goal", "MEERKAT_META={not json"}, 0)
+		if err == nil || !strings.Contains(err.Error(), "MEERKAT_META is not JSON") {
+			t.Fatalf("err = %v, want the startup failure naming MEERKAT_META", err)
 		}
 	})
 

@@ -14,18 +14,18 @@ import (
 )
 
 // Layout is one sessionsDir: under bases/<Base> one ready base session (the newest) and N older
-// base sessions that ended without pm_base_ready; under query/<Base> N query forks of the ready
-// base, ask comment ids AskFrom..AskFrom+N-1, every other one settled with pm_reply; under
-// proxy/<Base> N proxy forks, every other one done with pm_return_facts.
+// base sessions that ended without meerkat_base_ready; under query/<Base> N query forks of the
+// ready base, ask comment ids AskFrom..AskFrom+N-1, every other one settled with meerkat_reply;
+// under proxy/<Base> N proxy forks, every other one done with meerkat_return_facts.
 type Layout struct {
 	Base      string    // base id, config.BaseID(guardian, repo, model)
-	Model     string    // model recorded in pm-meta
+	Model     string    // model recorded in meerkat-meta
 	N         int       // historic base files, query files and proxy files, each
 	FileBytes int       // approximate size of every session file
 	LineBytes int       // approximate payload size of one large line
 	AskFrom   int64     // first query ask comment id
 	Start     time.Time // header timestamp of the oldest session; each next one is a minute later
-	// Fingerprint is the ready base's pm-meta fingerprint (forks copy it).
+	// Fingerprint is the ready base's meerkat-meta fingerprint (forks copy it).
 	Fingerprint json.RawMessage
 }
 
@@ -51,7 +51,7 @@ func WriteDir(root string, l Layout) (Written, error) {
 		}
 		w.Bases = append(w.Bases, s.id)
 	}
-	ready := session{kind: "base", id: "0bffffff-0000-7000-8000-000000000000", started: next(), goal: "pm_base_ready"}
+	ready := session{kind: "base", id: "0bffffff-0000-7000-8000-000000000000", started: next(), goal: "meerkat_base_ready"}
 	ready.meta = l.meta(map[string]any{"kind": "base"})
 	if err := write(baseDir, ready, l); err != nil {
 		return w, err
@@ -61,7 +61,7 @@ func WriteDir(root string, l Layout) (Written, error) {
 		s := session{kind: "query", id: fmt.Sprintf("0c%06d-0000-7000-8000-000000000000", i), started: next(), parent: &ready}
 		s.meta = l.meta(map[string]any{"kind": "query", "ref": "mouriya-s-lab/meerkat-e2e-code#1", "ask": l.AskFrom + int64(i), "tier": "simple"})
 		if i%2 == 0 {
-			s.goal = "pm_reply"
+			s.goal = "meerkat_reply"
 		}
 		if err := write(filepath.Join(root, "query", l.Base), s, l); err != nil {
 			return w, err
@@ -72,7 +72,7 @@ func WriteDir(root string, l Layout) (Written, error) {
 		s := session{kind: "proxy", id: fmt.Sprintf("0d%06d-0000-7000-8000-000000000000", i), started: next(), parent: &ready}
 		s.meta = l.meta(map[string]any{"kind": "proxy", "ref": "mouriya-s-lab/meerkat-e2e-agenda#1", "seat": "ClaudeHigh"})
 		if i%2 == 0 {
-			s.goal = "pm_return_facts"
+			s.goal = "meerkat_return_facts"
 		}
 		if err := write(filepath.Join(root, "proxy", l.Base), s, l); err != nil {
 			return w, err
@@ -131,9 +131,9 @@ func write(dir string, s session, l Layout) error {
 	line(header)
 	at := s.started
 	if s.parent != nil {
-		// Copied parent history: its pm-meta and a few turns, all before this header.
+		// Copied parent history: its meerkat-meta and a few turns, all before this header.
 		pt := s.parent.started
-		line(map[string]any{"type": "custom", "customType": "pm-meta", "data": s.parent.meta, "id": "p0", "timestamp": ts(pt)})
+		line(map[string]any{"type": "custom", "customType": "meerkat-meta", "data": s.parent.meta, "id": "p0", "timestamp": ts(pt)})
 		for i := range 3 {
 			pt = pt.Add(time.Second)
 			turn(line, ts(pt), i, "read", l.LineBytes/4)
@@ -142,7 +142,7 @@ func write(dir string, s session, l Layout) error {
 		line(toolResult(ts(pt), "p-goal", s.parent.goal, false, 64))
 		at = at.Add(time.Second)
 	}
-	line(map[string]any{"type": "custom", "customType": "pm-meta", "data": s.meta, "id": "m0", "timestamp": ts(at)})
+	line(map[string]any{"type": "custom", "customType": "meerkat-meta", "data": s.meta, "id": "m0", "timestamp": ts(at)})
 	for i := 0; b.Len() < l.FileBytes; i++ {
 		at = at.Add(time.Second)
 		turn(line, ts(at), i, "edit", l.LineBytes)

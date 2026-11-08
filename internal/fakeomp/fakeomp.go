@@ -3,8 +3,8 @@
 //
 //	FAKE_OMP_PLAN      comma-separated steps goal/text/retry/fatal/loop/stall/die; the last repeats
 //	FAKE_OMP_GOAL      goal tool name; default: the first entry of the comma list the starting
-//	                   program hands its plugin, PM_GOAL_TOOL (meerkat-guardians) or PM_GOAL_TOOLS
-//	                   (meerkat-council)
+//	                   program hands its plugin, MEERKAT_GOAL_TOOL (meerkat-guardians) or
+//	                   MEERKAT_GOAL_TOOLS (meerkat-council)
 //	FAKE_OMP_ARGS      path of a JSON file with the goal tool's arguments
 //	FAKE_OMP_DELAY_MS  delay before each step, in milliseconds
 //
@@ -20,8 +20,8 @@
 // --fork <source> creates it before the ready frame, its header's parentSession the source
 // header's id (the source's entries are not copied).
 //
-// PM_META, when set, is written as the session's pm-meta custom entry right after the
-// header, as the council plugin does at session start (meerkat-guardians#22); a PM_META that is
+// MEERKAT_META, when set, is written as the session's meerkat-meta custom entry right after the
+// header, as the plugins do at session start (meerkat-guardians#22); a MEERKAT_META that is
 // not JSON fails the run before the ready frame.
 //
 // The omprpc test binary (TestMain) and cmd/fake-omp both call Main; there is no second
@@ -67,7 +67,7 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 // per newline-delimited command until stdin ends, prompts driving the plan's steps in
 // order with the last step repeating.
 func run(args []string, stdin io.Reader, stdout, stderr io.Writer, plan []step) error {
-	meta, err := pmMeta()
+	meta, err := meerkatMeta()
 	if err != nil {
 		return err
 	}
@@ -126,15 +126,15 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer, plan []step) 
 	return sc.Err()
 }
 
-// pmMeta is PM_META as raw JSON; empty when unset. The council plugin parses the same
-// variable at load and fails on invalid JSON, so the fake does too.
-func pmMeta() (json.RawMessage, error) {
-	v := os.Getenv("PM_META")
+// meerkatMeta is MEERKAT_META as raw JSON; empty when unset. The plugins parse the same
+// variable at load and fail on invalid JSON, so the fake does too.
+func meerkatMeta() (json.RawMessage, error) {
+	v := os.Getenv("MEERKAT_META")
 	if v == "" {
 		return nil, nil
 	}
 	if !json.Valid([]byte(v)) {
-		return nil, fmt.Errorf("fake-omp: PM_META is not JSON: %s", v)
+		return nil, fmt.Errorf("fake-omp: MEERKAT_META is not JSON: %s", v)
 	}
 	return json.RawMessage(v), nil
 }
@@ -183,22 +183,23 @@ func parsePlan(s string) ([]step, error) {
 }
 
 // goalTool reads the goal tool name: FAKE_OMP_GOAL, else the first entry of the comma
-// list the starting program hands its plugin (meerkat-guardians sets PM_GOAL_TOOL, meerkat-council
-// PM_GOAL_TOOLS; a program sets only its own), else a default that still names a goal tool.
+// list the starting program hands its plugin (meerkat-guardians sets MEERKAT_GOAL_TOOL,
+// meerkat-council MEERKAT_GOAL_TOOLS; a program sets only its own), else a default that
+// still names a goal tool.
 func goalTool() string {
 	if g := os.Getenv("FAKE_OMP_GOAL"); g != "" {
 		return g
 	}
-	list := os.Getenv("PM_GOAL_TOOL")
+	list := os.Getenv("MEERKAT_GOAL_TOOL")
 	if list == "" {
-		list = os.Getenv("PM_GOAL_TOOLS")
+		list = os.Getenv("MEERKAT_GOAL_TOOLS")
 	}
 	for _, t := range strings.Split(list, ",") {
 		if t = strings.TrimSpace(t); t != "" {
 			return t
 		}
 	}
-	return "pm_return_facts"
+	return "meerkat_return_facts"
 }
 
 // command is one command line of the omp RPC protocol.

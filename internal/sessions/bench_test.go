@@ -30,7 +30,7 @@ func benchDir(b *testing.B, c benchCase) (string, synth.Written) {
 }
 
 var benchGoals = map[Kind][]string{
-	KindBase: {"pm_base_ready"}, KindProxy: {"pm_return_facts"}, KindQuery: {"pm_reply", "pm_replace", "pm_escalate"},
+	KindBase: {"meerkat_base_ready"}, KindProxy: {"meerkat_return_facts"}, KindQuery: {"meerkat_reply", "meerkat_replace", "meerkat_escalate"},
 }
 
 // BenchmarkParseFile parses one ~1 MiB session file whose turns carry 64 KiB payloads.

@@ -23,13 +23,13 @@ func TestParseBaseFile(t *testing.T) {
 	if want := time.Date(2026, 11, 6, 21, 29, 6, 732e6, time.UTC); !f.StartedAt.Equal(want) {
 		t.Fatalf("startedAt = %v", f.StartedAt)
 	}
-	ready, ok := f.ToolOK["pm_base_ready"]
+	ready, ok := f.ToolOK["meerkat_base_ready"]
 	if !ok || ready.Before(f.StartedAt) || f.LastAt.Before(ready) {
-		t.Fatalf("pm_base_ready = %v %v (last %v)", ready, ok, f.LastAt)
+		t.Fatalf("meerkat_base_ready = %v %v (last %v)", ready, ok, f.LastAt)
 	}
 	m := f.Meta
 	if m == nil || m.Kind != KindBase || m.Fingerprint == nil || m.Fingerprint.Commit == "" ||
-		m.Fingerprint.Tools != "read,grep,glob,find,pm_base_ready,pm_return_facts" || len(m.Fingerprint.PromptSha256) != 64 {
+		m.Fingerprint.Tools != "read,grep,glob,find,meerkat_base_ready,meerkat_return_facts" || len(m.Fingerprint.PromptSha256) != 64 {
 		t.Fatalf("meta = %+v", m)
 	}
 }
@@ -42,16 +42,16 @@ func TestParseForkFile(t *testing.T) {
 	if f.ParentSession != "01a1b2c3-ebdd-7074-8ab9-ed037cac3607" {
 		t.Fatalf("parent = %q", f.ParentSession)
 	}
-	// The latest pm-meta is the fork's own, after the copied base entry.
+	// The latest meerkat-meta is the fork's own, after the copied base entry.
 	if f.Meta == nil || f.Meta.Kind != KindProxy || f.Meta.Seat != "ClaudeHigh" || f.Meta.Ref == "" {
 		t.Fatalf("meta = %+v", f.Meta)
 	}
-	if _, ok := f.ToolOK["pm_return_facts"]; !ok {
-		t.Fatal("pm_return_facts result missing")
+	if _, ok := f.ToolOK["meerkat_return_facts"]; !ok {
+		t.Fatal("meerkat_return_facts result missing")
 	}
 	// The copied base history predates the fork header and does not make the fork a ready base.
-	if _, ok := f.ToolOK["pm_base_ready"]; ok {
-		t.Fatal("copied pm_base_ready result counted")
+	if _, ok := f.ToolOK["meerkat_base_ready"]; ok {
+		t.Fatal("copied meerkat_base_ready result counted")
 	}
 }
 
@@ -66,18 +66,18 @@ func TestListDerivesState(t *testing.T) {
 	if err := os.WriteFile(FailurePath(filepath.Join(dir, "base.jsonl")), []byte(`{"reason":"omp exited"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// A proxy read that timed out: header and pm-meta, no goal tool result, nothing after.
+	// A proxy read that timed out: header and meerkat-meta, no goal tool result, nothing after.
 	timedOut := filepath.Join(dir, "timedout.jsonl")
 	if err := os.WriteFile(timedOut, []byte(
 		`{"type":"session","version":3,"id":"t-1","timestamp":"2026-11-06T20:00:00.000Z","cwd":"/c"}`+"\n"+
-			`{"type":"custom","customType":"pm-meta","data":{"kind":"proxy","ref":"o/a#1","base":"b","model":"m"},"id":"x","timestamp":"2026-11-06T20:00:01.000Z"}`+"\n"), 0o644); err != nil {
+			`{"type":"custom","customType":"meerkat-meta","data":{"kind":"proxy","ref":"o/a#1","base":"b","model":"m"},"id":"x","timestamp":"2026-11-06T20:00:01.000Z"}`+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	killedAt := time.Date(2026, 11, 6, 20, 0, 20, 5e6, time.UTC)
 	if err := writeFailure(timedOut, failureRecord{Reason: "session timeout after 20s", At: killedAt}); err != nil {
 		t.Fatal(err)
 	}
-	goals := map[Kind][]string{KindBase: {"pm_base_ready"}, KindProxy: {"pm_return_facts"}}
+	goals := map[Kind][]string{KindBase: {"meerkat_base_ready"}, KindProxy: {"meerkat_return_facts"}}
 	list, err := NewRegistry(config.LaunchLink{}).List(dir, goals, 10)
 	if err != nil {
 		t.Fatal(err)
@@ -126,7 +126,7 @@ func TestListParent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	list, err := NewRegistry(config.LaunchLink{}).List(dir, map[Kind][]string{KindBase: {"pm_base_ready"}, KindProxy: {"pm_return_facts"}}, 10)
+	list, err := NewRegistry(config.LaunchLink{}).List(dir, map[Kind][]string{KindBase: {"meerkat_base_ready"}, KindProxy: {"meerkat_return_facts"}}, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +142,7 @@ func TestListParent(t *testing.T) {
 	}
 }
 
-// A failure record whose session file omp never wrote lists as its own row (§I): kind,
+// A failure record whose session file omp never wrote lists as its own row: kind,
 // model, base label and startedAt come from what Run knew at launch, state is failed,
 // error is the reason, endedAt is the decision time.
 func TestListOrphanFailure(t *testing.T) {
@@ -159,7 +159,7 @@ func TestListOrphanFailure(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	goals := map[Kind][]string{KindBase: {"pm_base_ready"}}
+	goals := map[Kind][]string{KindBase: {"meerkat_base_ready"}}
 	list, err := NewRegistry(config.LaunchLink{}).List(dir, goals, 10)
 	if err != nil {
 		t.Fatal(err)
@@ -185,7 +185,7 @@ func TestListOrphanFailure(t *testing.T) {
 }
 
 // When the session file appears after all, the file is authoritative: the same id lists
-// once, with the file's last entry as the end time and no orphan row beside it (§I).
+// once, with the file's last entry as the end time and no orphan row beside it.
 func TestListOrphanSupersededByFile(t *testing.T) {
 	dir := t.TempDir()
 	killedAt := time.Date(2026, 11, 7, 14, 0, 20, 0, time.UTC)
@@ -193,7 +193,7 @@ func TestListOrphanSupersededByFile(t *testing.T) {
 	sessionFile := filepath.Join(dir, "timedout.jsonl")
 	if err := os.WriteFile(sessionFile, []byte(
 		`{"type":"session","version":3,"id":"t-1","timestamp":"2026-11-06T20:00:00.000Z","cwd":"/c"}`+"\n"+
-			`{"type":"custom","customType":"pm-meta","data":{"kind":"proxy","ref":"o/a#1","base":"b","model":"m"},"id":"x","timestamp":"2026-11-06T20:00:01.000Z"}`+"\n"), 0o644); err != nil {
+			`{"type":"custom","customType":"meerkat-meta","data":{"kind":"proxy","ref":"o/a#1","base":"b","model":"m"},"id":"x","timestamp":"2026-11-06T20:00:01.000Z"}`+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := writeFailure(sessionFile, failureRecord{
@@ -202,7 +202,7 @@ func TestListOrphanSupersededByFile(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	goals := map[Kind][]string{KindProxy: {"pm_return_facts"}}
+	goals := map[Kind][]string{KindProxy: {"meerkat_return_facts"}}
 	cands, err := Newest(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -231,7 +231,7 @@ func TestListOrphanSupersededByFile(t *testing.T) {
 
 // Records predating the identity fields (reason and at only, e.g. TestListDerivesState's
 // base record) cannot name a session on their own, so they yield no extra row; the reason
-// still annotates the matching session file (§4 failure text survives).
+// still annotates the matching session file.
 func TestListOldFormatRecord(t *testing.T) {
 	dir := t.TempDir()
 	sessionFile := filepath.Join(dir, "missing.jsonl")
@@ -249,7 +249,7 @@ func TestListOldFormatRecord(t *testing.T) {
 	if len(cands) != 0 {
 		t.Fatalf("old-format record without a file must not list, got %+v", cands)
 	}
-	list, err := NewRegistry(config.LaunchLink{}).List(dir, map[Kind][]string{KindBase: {"pm_base_ready"}}, 10)
+	list, err := NewRegistry(config.LaunchLink{}).List(dir, map[Kind][]string{KindBase: {"meerkat_base_ready"}}, 10)
 	if err != nil || len(list) != 0 {
 		t.Fatalf("list = %+v %v", list, err)
 	}
